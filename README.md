@@ -114,7 +114,8 @@ bunx --package typescript tsc -p .
 claude plugin test .
 ```
 
-The sprite cat is `assets/cat-sheet.png` (32×24 frames, described by `assets/cat-sheet.json`), baked
+The sprite cat is `assets/cat-sheet.png` (64×36 frames, described by `assets/cat-sheet.json`; the
+earlier 32×24 sheet is kept under `assets/v1-32x24/`), baked
 into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet. A sheet of
 64×36 frames (512×252, same manifest with `frameWidth` 64 and `frameHeight` 36) is drawn in sextants,
 six pixels a cell and two colors a cell: three times the detail at the same size on screen.
