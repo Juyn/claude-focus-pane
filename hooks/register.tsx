@@ -222,7 +222,7 @@ const lineCat = (columns: number, isWorking: boolean, mood: string) => {
 
 /** `sprite`, `3d`, `line`, `pixel` or `off`, from a command or the store; `on` and old booleans too. */
 const asPetStyle = (value: unknown): PetStyle | null =>
-  value === 'sprite' || value === '3d' || value === 'line' || value === 'pixel' || value === 'off'
+  value === 'png' || value === 'sprite' || value === '3d' || value === 'line' || value === 'pixel' || value === 'off'
     ? value
     : value === 'on' || value === true
       ? 'sprite'
@@ -400,7 +400,17 @@ const CAT3_FRAME_MS = 90
 let animator: Timer | undefined
 
 /** What the strip is drawn at, from the last render: a blit must match it. */
-const stage = { columns: 0, ground: '', ink: '', mood: '', style: '' as PetStyle | '' }
+const stage = { columns: 0, ground: '', ink: '', mood: '', style: '' as PetStyle | '', left: 0, root: '' }
+
+/**
+ * The `png` cat: a real Image, one file a frame, where the terminal draws
+ * pictures. 64 by 36 pixels over 32 columns by 9 rows keeps them square.
+ */
+const PNG_COLUMNS = 32
+const PNG_ROWS = 9
+
+/** Why the terminal would not draw the Image, once it said so: the sprite cat takes over. */
+let imageRefusal = ''
 
 const FACING_VIEWER = -Math.PI / 2
 
@@ -470,12 +480,40 @@ const cat3Strip = (columns: number, ground: string, ink: string, mood: string) =
   return toBase64(new Uint8Array(words.buffer))
 }
 
+/** The file of the frame the sprite cat is on, as scripts/build-frames.py names them. */
+const frameFile = () =>
+  `${stage.root}/assets/frames/${actor.beat.clip}-${actor.beat.frames[actor.at] ?? 0}${actor.beat.isFlipped ? '-flip' : ''}.png`
+
+/** Where the `png` cat stands, in columns from the left of its strip. */
+const pngLeft = (columns: number) => Math.round(Math.max(0, Math.min(actor.x, columns - PNG_COLUMNS)))
+
 /** Starts the animated cat's frames, 3D or sprite; each goes out by `$.ui.blit`. */
 const animate = ($: EngineInterface, isWorking: boolean) => {
   animator?.cancel()
   let waited = 0
   animator = $.clock.every(SPRITE_TICK_MS, () => {
     if (stage.columns === 0) return
+    if (stage.style === 'png') {
+      if (!stepSprite(SPRITE_TICK_MS, isWorking, stage.columns)) return
+      // A step sideways moves the picture in the layout: that is a redraw. A
+      // new frame in place is a swap of its file, with no redraw.
+      if (pngLeft(stage.columns) !== stage.left) {
+        $.ui.invalidate('ui.render')
+
+        return
+      }
+      void $.ui
+        .blit({ requestId: PANE, key: 'petimg', source: { file: frameFile(), format: 'png' } })
+        .then(told => {
+          if (told.deny === undefined || imageRefusal !== '') return
+          imageRefusal = told.deny
+          $.ui.toast(`focus-pane : pas d'image dans ce terminal (${told.deny}) — chat en sprites`)
+          $.ui.invalidate('ui.render')
+        })
+        .catch(() => undefined)
+
+      return
+    }
     if (stage.style === 'sprite') {
       if (!stepSprite(SPRITE_TICK_MS, isWorking, stage.columns)) return
       void $.ui
@@ -1125,7 +1163,7 @@ const skinOf = (value: unknown): Skin => {
  */
 const COMMAND = {
   description: 'Rouvre et cadre le pane Unlocker',
-  argumentHint: 'auto | mission <texte> | spec <feature|off> | pet <sprite|3d|line|pixel|off> | demo | UNL-1234 <texte>',
+  argumentHint: 'auto | mission <texte> | spec <feature|off> | pet <png|sprite|3d|line|pixel|off> | demo | UNL-1234 <texte>',
 }
 
 const claimCommand = async ($: EngineInterface, isFreshLoad = false) => {
@@ -1592,7 +1630,8 @@ export const register: Register = on => {
 
     if (args === 'pet' || args.startsWith('pet ')) {
       const style = asPetStyle(args.slice('pet'.length).trim() || 'sprite')
-      if (style === null) return { text: 'Focus pane: pet sprite | 3d | line | pixel | off.' }
+      imageRefusal = ''
+      if (style === null) return { text: 'Focus pane: pet png | sprite | 3d | line | pixel | off.' }
       await update($, petStyle, () => style)
       await $.store.set('pet', style).catch(() => undefined)
 
@@ -1600,7 +1639,7 @@ export const register: Register = on => {
         text:
           style === 'off'
             ? 'Focus pane: le chat est rentré.'
-            : `Focus pane: le chat est là (${style === 'sprite' ? 'en sprites' : style === '3d' ? 'en 3D' : style === 'line' ? 'au trait' : 'en pixels'}).`,
+            : `Focus pane: le chat est là (${style === 'png' ? 'en image' : style === 'sprite' ? 'en sprites' : style === '3d' ? 'en 3D' : style === 'line' ? 'au trait' : 'en pixels'}).`,
       }
     }
 
@@ -2129,9 +2168,12 @@ export const register: Register = on => {
     const Raster = 'Raster' in table ? table.Raster : undefined
     const asked: PetStyle = await read($, petStyle)
     const canPixel = Raster !== undefined && tone.panel !== undefined && tone.text !== undefined
-    const style: PetStyle = asked !== 'off' && asked !== 'line' && !canPixel ? 'line' : asked
+    const Image = 'Image' in table ? table.Image : undefined
+    const fitted: PetStyle = asked !== 'off' && asked !== 'line' && !canPixel ? 'line' : asked
+    // No Image on this surface, or a terminal that refused it: the sprite cat.
+    const style: PetStyle = fitted === 'png' && (Image === undefined || imageRefusal !== '') ? 'sprite' : fitted
     const petRows =
-      style === 'sprite' ? SPRITE_ROWS : style === '3d' ? CAT3_ROWS : style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
+      style === 'png' ? PNG_ROWS : style === 'sprite' ? SPRITE_ROWS : style === '3d' ? CAT3_ROWS : style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
     const mood = pet.isAsleep
       ? 'z'
       : pet.moodTicks > 0
@@ -2145,6 +2187,8 @@ export const register: Register = on => {
     stage.ink = tone.text ?? ''
     stage.mood = mood
     stage.style = style
+    stage.left = pngLeft(room)
+    stage.root = $.plugin.root
 
     const rowsOf = (outlines: number, todosKept: number, share: number) => {
       const paperRows = (one: Doc) =>
@@ -2528,6 +2572,18 @@ export const register: Register = on => {
             rows={PET_ROWS}
             cells={petStrip(room, tone.panel, tone.text, mood)}
           />
+        )}
+        {style === 'png' && Image !== undefined && (
+          <Box key="pet" flexDirection="row" width="100%" height={PNG_ROWS}>
+            <Box width={stage.left} flexShrink={0} />
+            <Image
+              key="petimg"
+              source={{ file: frameFile(), format: 'png' }}
+              columns={PNG_COLUMNS}
+              rows={PNG_ROWS}
+              alt=" "
+            />
+          </Box>
         )}
         {style === 'sprite' && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
           <Raster

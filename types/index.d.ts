@@ -58,7 +58,7 @@ export type Feature = {
 }
 
 /** How the cat at the bottom of the pane is drawn: the sprite sheet, ray-marched in 3D, line art, flat pixels, or not at all. */
-export type PetStyle = 'sprite' | '3d' | 'line' | 'pixel' | 'off'
+export type PetStyle = 'png' | 'sprite' | '3d' | 'line' | 'pixel' | 'off'
 
 /** The mockups tab: the screens of the bound mockup, shot once by thumbs.py. */
 export type Gallery = {
