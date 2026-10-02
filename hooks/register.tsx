@@ -661,9 +661,6 @@ export const register: Register = on => {
       .catch(() => null)
     if (saved !== null) await update($, board, () => saved)
 
-    // The feature this directory was last bound to, read again: the files moved on.
-    const bound = asText(await $.store.get(`feature:${await $.session.cwd()}`).catch(() => null))
-    if (bound) await bindFeature($, bound.split('/').pop() ?? bound).catch(() => null)
 
     const branch = await $.process
       .run(['git', 'branch', '--show-current'], { cwd: await $.session.cwd() })
@@ -676,7 +673,14 @@ export const register: Register = on => {
       branch: branch || null,
       ticket: was.ticket ?? (hit ? hit[0] : null),
     }))
-    if (hit && (await read($, feature)) === null) await bindFeature($, hit[0]).catch(() => null)
+    // The feature this checkout was last bound to, read again: the files moved on.
+    // Only in a checkout on a branch: a bare folder (a workspace root) is no one
+    // feature's home, and a new session there starts unbound.
+    const last = branch
+      ? asText(await $.store.get(`feature:${await $.session.cwd()}`).catch(() => null))
+      : ''
+    if (last) await bindFeature($, last.split('/').pop() ?? last).catch(() => null)
+    else if (hit && (await read($, feature)) === null) await bindFeature($, hit[0]).catch(() => null)
 
     return next(e)
   })

@@ -101,6 +101,9 @@ With the keyboard in the pane (click it, or `ctrl+x tab`): `a` task, `t` link, `
 `m` mockup thumbnails, `o` open the mockup, `esc` back to the prompt.
 
 A branch that carries a ticket known to a Sacred Book README binds its feature at session start.
+A binding made with `spec` is remembered per checkout and restored at the next session there; outside
+a git checkout (a workspace root) it lasts the session only. Comments and the personal todo are
+kept per working directory everywhere.
 
 ## Develop
 
