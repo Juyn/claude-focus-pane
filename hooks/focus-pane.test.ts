@@ -705,7 +705,7 @@ test('on the desktop the cat and its meadow are one self-playing Svg', async ($,
 
   expect(sources.filter(one => /@keyframes play/.test(one))).toHaveLength(1)
   // The meadow is in the same picture: the decor sheet, its ground and its grass.
-  expect(sources.find(one => /@keyframes play/.test(one))).toMatch(/id="d".*@?|k-grass_/s)
+  expect(sources.find(one => /@keyframes play/.test(one))).toMatch(/@keyframes k-grass_/)
   expect(sources.find(one => /@keyframes play/.test(one))).toMatch(/@keyframes k-beetle/)
   expect(sources.filter(one => /viewBox="0 0 100 3"/.test(one))).toHaveLength(2)
   expect(await pane.find({ type: 'Raster' })).toBeUndefined()
