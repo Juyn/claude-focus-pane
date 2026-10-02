@@ -1564,7 +1564,9 @@ export const register: Register = on => {
     await meterUsage($).catch(() => undefined)
     const style = asPetStyle(await $.store.get('pet').catch(() => null))
     if (style !== null) await update($, petStyle, () => style)
-    pace($, false)
+    // A reload lands in the middle of a turn as well as between two: the turn
+    // atom outlives it and says which, where a fresh module would guess rest.
+    pace($, (await read($, turn)).isRunning)
 
     const saved = await shelf($)
       .then(key => $.store.get(key))
