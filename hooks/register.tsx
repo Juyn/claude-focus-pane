@@ -1342,15 +1342,24 @@ const svgKey = () =>
     actor.beat.stride === 0 ? Math.round(actor.x) : actor.goal,
     scene.lines.join('|'),
     stage.coat,
+    scene.done,
+    scene.fails,
+    isFeasting(),
+    scene.effects.length,
+    scene.effects[scene.effects.length - 1]?.born ?? 0,
+    new Date().getHours(),
   ].join('/')
 
 const escaped = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /**
- * The cat as one self-playing picture: the sheet itself behind a window a
- * frame wide, stepped by CSS, and slid along the ground to where it is headed.
+ * The scene as one self-playing picture, where a surface draws real pictures:
+ * the two sheets themselves behind windows a frame wide, stepped and moved by
+ * CSS. It is drawn again only when what it shows changes, so every animation
+ * starts as far in as the scene's clock says, and none jumps on a redraw.
  */
-const catSvg = (ground: string | undefined) => {
+const sceneSvg = (ground: string | undefined) => {
+  tend(SVG_WIDTH)
   const drawn = SHEETS[stage.coat].big
   const clip = drawn.clips[actor.beat.clip]
   const span = SVG_WIDTH - drawn.w
@@ -1366,41 +1375,158 @@ const catSvg = (ground: string | undefined) => {
       return `${((at / actor.beat.frames.length) * 100).toFixed(2)}%{transform:${shift}}`
     })
     .join('')
-  const height = SVG_TOP + drawn.h + SVG_GROUND
-  const bubble =
-    scene.lines.length === 0
-      ? ''
-      : (() => {
-          const wide = Math.max(...scene.lines.map(one => one.length)) * 4.3 + 12
-          const isRight = to + drawn.w + wide <= SVG_WIDTH
-          const left = isRight ? to + drawn.w - 6 : Math.max(0, to - wide + 6)
-          const tall = scene.lines.length * 8 + 6
-          const rows = scene.lines
-            .map((one, at) => `<text x="${left + 6}" y="${9 + at * 8}">${escaped(one)}</text>`)
-            .join('')
+  const floor = SVG_TOP + drawn.h
+  const height = floor + 4
+  const rules = new Map<string, string>()
 
-          return (
-            `<rect x="${left}" y="1" width="${wide}" height="${tall}" rx="3" fill="${ground ?? '#10141f'}" ` +
-            `stroke="#6b7699" stroke-width="0.6"/><g font-family="ui-monospace,monospace" font-size="6.5" ` +
-            `fill="${stage.ink || '#e6eaf5'}">${rows}</g>`
-          )
-        })()
+  /** The keyframes that step a piece of the decor through its frames, made once a piece. */
+  const reelOf = (name: DecorName) => {
+    const item = DECOR.items[name]
+    if (!rules.has(name)) {
+      const at = (frame: number) => `translate(${-(item.at[0] + frame * item.w)}px,${-item.at[1]}px)`
+      const frames = item.frames.map((_frame, k) => `${((k / item.frames.length) * 100).toFixed(2)}%{transform:${at(k)}}`)
+      rules.set(name, `@keyframes k-${name}{${frames.join('')}100%{transform:${at(item.frames.length - 1)}}}`)
+    }
+
+    return item.frames.length * item.ms
+  }
+  /**
+   * One piece of the decor in a window its size: `age` how far into its frames
+   * it already is; `once` plays it through and holds (or, `fades`, vanishes).
+   */
+  const piece = (name: DecorName, x: number, y: number, age = scene.clock, mode: 'loop' | 'once' | 'fades' = 'loop') => {
+    const item = DECOR.items[name]
+    const window = `<svg x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${item.w}" height="${item.h}"`
+    if (item.frames.length === 1) {
+      return `${window} viewBox="${item.at[0]} ${item.at[1]} ${item.w} ${item.h}"><use href="#d"/></svg>`
+    }
+    const length = reelOf(name)
+    const run =
+      mode === 'loop'
+        ? `k-${name} ${length}ms step-end ${-(age % length)}ms infinite`
+        : `k-${name} ${length}ms step-end ${-Math.min(age, length)}ms 1 forwards`
+    const fade = mode === 'fades' ? `,gone 1ms linear ${Math.max(0, length - age)}ms 1 forwards` : ''
+
+    return `${window} viewBox="0 0 ${item.w} ${item.h}"><use href="#d" style="animation:${run}${fade}"/></svg>`
+  }
+  const stand = (name: DecorName, x: number, age?: number, mode?: 'loop' | 'once' | 'fades') =>
+    piece(name, x, floor - 16, age, mode)
+
+  const hour = new Date().getHours()
+  const isDay = hour >= 7 && hour < 20
+  const parts: string[] = []
+  // The sky: the sun or the moon, and by day a cloud crossing it.
+  parts.push(piece(isDay ? 'sun' : 'moon', SVG_WIDTH - 20, 0))
+  if (isDay) {
+    const crossing = 110_000
+    parts.push(
+      `<g style="animation:drift ${crossing}ms linear ${-((scene.clock + crossing * 0.3) % crossing)}ms infinite">` +
+        `${piece('cloud_b', 0, 0)}</g>`,
+    )
+  } else {
+    const sky = seeded(SVG_WIDTH + 7)
+    for (let k = 0; k < 9; k += 1) parts.push(piece('star', sky() * (SVG_WIDTH - 16), sky() * (floor - 30), scene.clock + k * 300))
+  }
+  // The ground, tile by tile, the same tiles in the same order as on a terminal this wide.
+  const tiles = seeded(SVG_WIDTH + 3)
+  for (let x = 0; x < SVG_WIDTH; x += 16) {
+    const tile = DECOR.items[(['ground_a', 'ground_b', 'ground_c'] as const)[Math.floor(tiles() * 3)] ?? 'ground_a']
+    parts.push(
+      `<svg x="${x}" y="${floor}" width="16" height="4" viewBox="${tile.at[0]} ${tile.at[1] + 12} 16 4"><use href="#d"/></svg>`,
+    )
+  }
+  // What grew: a bloom a finished todo, a mushroom a failed call.
+  for (const one of scene.blooms) {
+    const [grow, sway] = BLOOMS[one.kind] ?? BLOOMS[0]!
+    const age = scene.clock - one.born
+    const grown = DECOR.items[grow].frames.length * DECOR.items[grow].ms
+    parts.push(age < grown ? stand(grow, one.x, age, 'once') : stand(sway, one.x, age - grown))
+  }
+  for (const one of scene.mushrooms) {
+    const rising = DECOR.items.mushroom_a_appear
+    const age = scene.clock - one.born
+    parts.push(
+      age < rising.frames.length * rising.ms
+        ? stand('mushroom_a_appear', one.x, age, 'once')
+        : stand(MUSHROOMS[one.kind] ?? 'mushroom_a', one.x),
+    )
+  }
+  if (isFeasting()) {
+    // The wave of an RGB keyboard: two crests of squares, each column bobbing a
+    // little after its neighbour, and the hue of the whole turning.
+    const air = floor - 6
+    for (let crest = 0; crest < 2; crest += 1) {
+      const period = 1500 + crest * 500
+      for (let x = 2; x < SVG_WIDTH; x += 7) {
+        const lag = -(((x * (9 + crest * 4) + scene.clock) % (period * 2)) + crest * 400)
+        parts.push(
+          `<rect x="${x}" y="2" width="3" height="3" fill="hsl(${(x * 3 + crest * 150) % 360} 90% 60%)" ` +
+            `style="animation:bob-${crest} ${period}ms ease-in-out ${lag}ms infinite alternate"/>`,
+        )
+      }
+      rules.set(`bob-${crest}`, `@keyframes bob-${crest}{from{transform:translateY(0)}to{transform:translateY(${air - 8}px)}}`)
+    }
+    parts.push(stand('lasagne', SVG_WIDTH - 44))
+  }
+
+  // The cat, sliding to where it is headed while its frames step.
+  parts.push(
+    `<g class="at"><svg y="${SVG_TOP}" width="${drawn.w}" height="${drawn.h}" viewBox="0 0 ${drawn.w} ${drawn.h}">` +
+      `<g${actor.beat.isFlipped ? ` transform="translate(${drawn.w},0) scale(-1,1)"` : ''}>` +
+      `<image class="reel" width="${drawn.w * drawn.across}" height="${drawn.h * drawn.down}" ` +
+      `href="data:image/png;base64,${drawn.png}"/></g></svg></g>`,
+  )
+  const headX = actor.beat.isFlipped ? to + 10 : to + drawn.w - 12
+  if (actor.beat.clip === 'sleep') parts.push(piece('zzz', headX - 4, SVG_TOP - 8))
+
+  // Before the cat: the grass, the ladybird on its way, the butterfly, what is playing.
+  for (const one of scene.front) parts.push(stand(one.item, one.x, scene.clock + one.x * 97))
+  const walk = (SVG_WIDTH + 32) * DECOR.items.beetle.ms
+  parts.push(
+    `<g style="animation:cross ${walk}ms linear ${-(scene.clock % walk)}ms infinite">${stand('beetle', -16)}</g>`,
+  )
+  parts.push(
+    `<g style="animation:flutter-x 9100ms ease-in-out ${-(scene.clock % 18_200)}ms infinite alternate">` +
+      `<g style="animation:flutter-y 2600ms ease-in-out ${-(scene.clock % 5200)}ms infinite alternate">` +
+      `${piece('butterfly', 0, 0)}</g></g>`,
+  )
+  for (const one of scene.effects) {
+    const age = scene.clock - one.born
+    if (age >= 0) parts.push(piece(one.item, one.x, SVG_TOP + one.y, age, 'fades'))
+  }
+
+  // What the cat says, beside where it is headed.
+  if (scene.lines.length > 0) {
+    const wide = Math.max(...scene.lines.map(one => one.length)) * 4.3 + 12
+    const isRight = to + drawn.w + wide <= SVG_WIDTH
+    const left = isRight ? to + drawn.w - 6 : Math.max(0, to - wide + 6)
+    const tall = scene.lines.length * 8 + 6
+    const rows = scene.lines.map((one, at) => `<text x="${left + 6}" y="${9 + at * 8}">${escaped(one)}</text>`).join('')
+    parts.push(
+      `<rect x="${left}" y="1" width="${wide}" height="${tall}" rx="3" fill="${ground ?? '#10141f'}" ` +
+        `stroke="#6b7699" stroke-width="0.6"/><g font-family="ui-monospace,monospace" font-size="6.5" ` +
+        `fill="${stage.ink || '#e6eaf5'}">${rows}</g>`,
+    )
+  }
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SVG_WIDTH} ${height}" width="100%">` +
     `<style>` +
+    `image{image-rendering:pixelated}` +
     `.at{animation:go ${Math.max(1, Math.round(travel))}ms linear forwards}` +
-    `.reel{animation:play ${reel}ms step-end infinite;image-rendering:pixelated}` +
+    `.reel{animation:play ${reel}ms step-end infinite}` +
     `@keyframes go{from{transform:translate(${from}px,0)}to{transform:translate(${to}px,0)}}` +
     `@keyframes play{${steps}}` +
+    `@keyframes gone{to{opacity:0}}` +
+    `@keyframes drift{from{transform:translate(-40px,0)}to{transform:translate(${SVG_WIDTH}px,0)}}` +
+    `@keyframes cross{from{transform:translate(0,0)}to{transform:translate(${SVG_WIDTH + 32}px,0)}}` +
+    `@keyframes flutter-x{from{transform:translate(30px,0)}to{transform:translate(${SVG_WIDTH - 50}px,0)}}` +
+    `@keyframes flutter-y{from{transform:translate(0,4px)}to{transform:translate(0,${Math.max(8, floor - 34)}px)}}` +
+    [...rules.values()].join('') +
     `</style>` +
+    `<defs><image id="d" width="${DECOR.sheet[0]}" height="${DECOR.sheet[1]}" href="data:image/png;base64,${DECOR.png}"/></defs>` +
     (ground === undefined ? '' : `<rect width="${SVG_WIDTH}" height="${height}" fill="${ground}"/>`) +
-    `<rect y="${SVG_TOP + drawn.h}" width="${SVG_WIDTH}" height="${SVG_GROUND}" fill="#8a7a1f"/>` +
-    `<g class="at"><svg y="${SVG_TOP}" width="${drawn.w}" height="${drawn.h}" viewBox="0 0 ${drawn.w} ${drawn.h}">` +
-    `<g${actor.beat.isFlipped ? ` transform="translate(${drawn.w},0) scale(-1,1)"` : ''}>` +
-    `<image class="reel" width="${drawn.w * drawn.across}" height="${drawn.h * drawn.down}" ` +
-    `href="data:image/png;base64,${drawn.png}"/></g></svg></g>` +
-    bubble +
+    parts.join('') +
     `</svg>`
   )
 }
@@ -1410,41 +1536,43 @@ const catSvg = (ground: string | undefined) => {
 // <decor> generated by scripts/build-sprites.py from assets/decor/ — do not edit
 const DECOR = {
   ink: 'abcdefghijklmno',
+  sheet: [256, 368],
+  png: 'iVBORw0KGgoAAAANSUhEUgAAAQAAAAFwBAMAAAClfriUAAAAMFBMVEUAAACP0U9PmjrAij56RSQvazTywjCKb9jyj6DohzrYRjz2tWttanzJz+AsKzQ7Sl4L5ODcAAAAAXRSTlMAQObYZgAABWpJREFUeNrtnTFv20YUx0+MJZkOW0n8BCQL70GVqVOBGB2axRDAPUPBNsiiwagyeigajZkMqFk8dClTGAWaxeXCuTgG/QAi0A9QBP4GKni8oyTKdjqU7wng/wdF/yOX97+nE+9IvXOEAAAA0HpG7qh4jcp3X72KJpmBIPgsUP8+L1tBEIyLNzID4/F4/GS8fh/rNp2BJ+vgj5+Mx4+1BTIDAAAAgBCeJbxCLeF5PAZ8a6jU7fAYcH1fBfb9YMhiIDyenG4qAACAFuKV07GwhMUT3/PULGhZFs9s6Ht6OtZKjuv6waaSEx5Pwk0FAABAjiX0dOwxTcfmtpzr9tzqlOsByxp6LOsBy/Vcf0PJ6QSu624oOd1JqNYBRgEAAAByzILIE0wLIl9YwyKyK6yh4FgSuaLjFb9UGCUnFN3T7ulaAQB7wLNnSno9fVw1iOhFkdIoKo2sG0RE36iAveirSBvSjea7zp0BE4dtDFg1rWampqeooX4sYHXu1+Z6XhroWO692qABre5HtDFM2cDHFABAxnSqpN/Xx1WDiP5spnQ2K42sG0TMvlcB+7NvZ9qQbjTfde4MmDhsYwDrAawHsB4AYG84P1dyeKiPqwYRh/O50vm8NLJuEDH/UQU8nH8314Z0o/muc2fAxGEbA1gPYD2A9QAAgB37NVPgOC51seCJf/RHfKkS8GbBk4I4fqtScHBy8uW9GWqKr+P4Z9V4eHt8k6HmePpO3GpA99xkqDmSmoGjy62eVxlqioMkKSMnJ0oexPGjQr+I498LffT03YNmMwAAAADIlDe+s5RlI2MyIqX8WxmR73kM/CPfKwOfyg88BsB+0GWOH05C1idRXd8NjgWfhW53NAqC8Jhrl084mRQGRkHAk4Mi/6NR4I9cLgNldHYDxUdwzGJg4rvKQAFLCiZBwGsg3KCdBromeBhivyET451GuwycbAEDMNBGA+xfQxiAgT0wAAA3sylx9Xydl2cvlYH+mS6iPyv9TA8EjbHZWZmB/g+vtgyY841T77lRk5nmDZzrnr/S5Xy6eq8/JdrXYPYT/OfzAAAAAAD/O6Za7y5tmqOr+MN92jhXcRnoLm2c+Cq+VxvHcRylqSPKEoo0VeoUZ9qB3XIDtr1YKAtsld2L6LkK/YbJgH0RRUVRuX3NlAA7iqLnjAbsRWFgsQ8ZSLjHQMKVgupbkPDsL1hfB7h2WHBfCffAAACqnpQ5fpbzOsjyPJdy0wNtrXFaGMjzvAqaOvmS0INclvHzZXUiy3NZHTaNk1foPmd5LSNkBpbp1gkiA1leS0GW58u8+BSIPoONDJQhs3yZytShNLDMcplVGZBSC9W1QcrUkcKRUnLvNAAAtBb2+wLzp2i5jNjq7lwIccH1kIg7A/xjAAAAAGBmtbphjr8qLPC5WBlKBwM+A6WDFaOBIvaA1cBNccRpwKQBBtoH97VwwJ349WWwpQYG3IN/cypqpYEB+wWIOwP8Bgar1Q3zlWjAeyWGAZZ1WB3zU5GzJWQ4OmIq0s1DcgNV4FQQ/3hW7zl1CnZ6zmagNhboYP4OsPPwOrkuSgnrSsbRL3H80+Wu0mUgSZLkt10l4884juNfd5UKVTagKgi2lcyAzMuIdaVLgYlXVzJM6UZdAWDEril1YLtn60MqByZOr6Zk6LoB+0VZR3DxIlInXqtXKzJQM0I/Bu7KCAobAAAAAECOo+8IU/OwjOp5lb4VdrKljq8dUD0uc/RmlmJrj9qM/9cnqQlPcpeclZtrnDwrN5WkDvETQ8fsKXEk09PyHfrU/9X6LRa4c4AEsEQ1I29WwGKhX1NypjVtXQLWY4D7S0jd79uVjukdSkX/DiWD/yNg5l8ceO8gnKlQcAAAAABJRU5ErkJggg==',
   palette: [0x8fd14f, 0x4f9a3a, 0xc08a3e, 0x7a4524, 0x2f6b34, 0xf2c230, 0x8a6fd8, 0xf28fa0, 0xd8463c, 0xf6b56b, 0xe8873a, 0x6d6a7c, 0xc9cfe0, 0x2c2b34, 0x3b4a5e],
   items: {
-    ground_a: { w: 16, h: 16, ms: 1, box: [0, 12, 16, 4], frames: ['................................................................................................................................................................................................aaabaaaaabaaaaaabbbbbcbbbbbbbcbbccccccccdcccccccccdcccccccccdccc'] },
-    ground_b: { w: 16, h: 16, ms: 1, box: [0, 12, 16, 4], frames: ['................................................................................................................................................................................................aaaaabaaaaaabaaabbcbbbbbbcbbbbbbccccdccccccccccccccccccccddccccc'] },
-    ground_c: { w: 16, h: 16, ms: 1, box: [0, 12, 16, 4], frames: ['................................................................................................................................................................................................aabaaaaaaaabaaaabbbbbbccbbbbbbbbccccccccccccdccccdcccccccccccccc'] },
-    grass_short: { w: 16, h: 16, ms: 450, box: [4, 12, 7, 4], frames: ['....................................................................................................................................................................................................b..b..b.........b.ba.ba.........abbabab.........eebeebe.....', '.....................................................................................................................................................................................................b..b.b.........b.ab.ab.........bababba.........eebeebe.....'] },
-    grass_medium: { w: 16, h: 16, ms: 450, box: [4, 11, 8, 5], frames: ['......................................................................................................................................................................................b...b.........b.b.b.a.........bab.bab.........ababbabb........eebeebee....', '.......................................................................................................................................................................................b...b.........b.b.ba.........bab.bab.........ababbabb........eebeebee....'] },
-    grass_tall: { w: 16, h: 16, ms: 450, box: [3, 10, 9, 6], frames: ['.....................................................................................................................................................................b....b..........b..b.b........b.ab.b.a........babb.abba.......abbababab.......eebeeebee....', '......................................................................................................................................................................b....b.........b..b.b........b.ba.b.a........babb.abba.......abbababab.......eebeeebee....'] },
-    grass_sparse: { w: 16, h: 16, ms: 450, box: [2, 12, 11, 4], frames: ['...................................................................................................................................................................................................b....b.........ba...ba..b......ab...ab..ab.....ee...ee..ee...', '..................................................................................................................................................................................................b......b........ab...ba...b.....ab...ab..ab.....ee...ee..ee...'] },
-    flower_yellow_grow: { w: 16, h: 16, ms: 260, box: [4, 6, 7, 10], frames: ['......................................................................................................................................................................................................a.a..............ba..............b..............ebe.......', '.......................................................................................................................................................f..............fff..............b...............b.a...........a.bab............ab..............ebe.......', '......................................................................................................f.f............fffff..........fffdfff..........fffff............f.f..............b...............b.a...........a.bab............ab..............ebe.......'] },
-    flower_yellow_sway: { w: 16, h: 16, ms: 420, box: [3, 6, 9, 10], frames: ['.....................................................................................................f.f............fffff..........fffdfff..........fffff............f.f..............b................b.a...........a.bab............ab..............ebe.......', '.......................................................................................................f.f............fffff..........fffdfff..........fffff............f.f..............b..............b.a...........a.bab............ab..............ebe.......'] },
-    flower_violet_grow: { w: 16, h: 16, ms: 260, box: [4, 6, 7, 10], frames: ['......................................................................................................................................................................................................a.a..............ba..............b..............ebe.......', '.......................................................................................................................................................g..............ggg..............b...............b.a...........a.bab............ab..............ebe.......', '......................................................................................................g.g............ggggg..........gggfggg..........ggggg............g.g..............b...............b.a...........a.bab............ab..............ebe.......'] },
-    flower_violet_sway: { w: 16, h: 16, ms: 420, box: [3, 6, 9, 10], frames: ['.....................................................................................................g.g............ggggg..........gggfggg..........ggggg............g.g..............b................b.a...........a.bab............ab..............ebe.......', '.......................................................................................................g.g............ggggg..........gggfggg..........ggggg............g.g..............b..............b.a...........a.bab............ab..............ebe.......'] },
-    flower_pink_grow: { w: 16, h: 16, ms: 260, box: [4, 6, 7, 10], frames: ['......................................................................................................................................................................................................a.a..............ba..............b..............ebe.......', '.......................................................................................................................................................h..............hhh..............b...............b.a...........a.bab............ab..............ebe.......', '......................................................................................................h.h............hhhhh..........hhhfhhh..........hhhhh............h.h..............b...............b.a...........a.bab............ab..............ebe.......'] },
-    flower_pink_sway: { w: 16, h: 16, ms: 420, box: [3, 6, 9, 10], frames: ['.....................................................................................................h.h............hhhhh..........hhhfhhh..........hhhhh............h.h..............b................b.a...........a.bab............ab..............ebe.......', '.......................................................................................................h.h............hhhhh..........hhhfhhh..........hhhhh............h.h..............b..............b.a...........a.bab............ab..............ebe.......'] },
-    mushroom_a: { w: 16, h: 16, ms: 1, box: [4, 9, 8, 7], frames: ['......................................................................................................................................................iiii...........ijiiii.........iiiiijii........diiiiiid..........djjd............jjjd...........djjjjd.....'] },
-    mushroom_b: { w: 16, h: 16, ms: 1, box: [5, 8, 6, 8], frames: ['.......................................................................................................................................kk.............kkkk...........kkjkkk..........dddddd............jd..............jd..............jd.............jjdd......'] },
-    mushroom_a_appear: { w: 16, h: 16, ms: 140, box: [4, 11, 8, 5], frames: ['.......................................................................................................................................................................................................................................ii............ciiiic.....', '......................................................................................................................................................................................................................iiii...........ijiiii.........ciiiiijc....', '......................................................................................................................................................................................iiii...........ijiiii.........iiiiijii........diiiiiid........c.djjd.c....'] },
-    rock_a: { w: 16, h: 16, ms: 1, box: [4, 12, 7, 4], frames: ['......................................................................................................................................................................................................lll............lmlll..........lllllln.........nllllnn.....'] },
-    rock_b: { w: 16, h: 16, ms: 1, box: [5, 13, 5, 3], frames: ['......................................................................................................................................................................................................................lml............lllln...........nllnn......'] },
-    bush: { w: 32, h: 16, ms: 1, box: [4, 3, 25, 13], frames: ['...............................................................................................................e............................eeebeee........................ebaabbbbe..e..................e.eaaaabbbbeebeee............eeebebaaaabbbbaabbbbe..........ebaabbbaaaabbbaaaabbbe..........eaaaabbbaaaabbaaaabbbe..........eaaaabbbaaaabbbaabbbbbe........ebbaabbbbaaaabbbbbbbbbbbe.......ebbbbbbbbaaaabbbbbbbbbbbe.......eeeeeeeeeeeeeeeeeeeeeeeee.......eeeeeeeeeeeeeeeeeeeeeeeee........eeeeeeeeeeeeeeee.eeeeee....'] },
-    signpost: { w: 32, h: 16, ms: 1, box: [2, 2, 28, 14], frames: ['......................................................................cc................cc............cc................cc........dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd........cc................cc............cc................cc............cc................cc............cc................cc............cc................cc............cc................cc......'] },
-    butterfly: { w: 16, h: 16, ms: 90, box: [4, 5, 7, 6], frames: ['....................................................................................ggg.ggg.........ghgdghg.........gggdggg..........ggdgg...........gh.hg............g.g.......................................................................................', '.....................................................................................................ggdgg...........ghdhg............gdg.............hgh.......................................................................................................', '......................................................................................................gdg.............gdg.............gdg..............h........................................................................................................', '....................................................................................................g..d..g.........gggdggg.........ghgdghg..........gg.gg............g.g.......................................................................................'] },
-    beetle: { w: 16, h: 16, ms: 120, box: [4, 11, 8, 5], frames: ['......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii...........l.l.l......', '......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii..........l..l..l.....', '......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii............l.l.l.....', '......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii...........l..l..l....'] },
-    sun: { w: 16, h: 16, ms: 1, box: [1, 1, 13, 13], frames: ['.......................k...............k...........k.kkkkk.k........kkfffkk........kkfffffkk.......kfffffffk.....kkkfffffffkkk.....kfffffffk.......kkfffffkk........kkfffkk........k.kkkkk.k...........k...............k........................................'] },
-    moon: { w: 16, h: 16, ms: 1, box: [3, 3, 8, 9], frames: ['.....................................................kk.............kjk............kjk.............kjk.............kjk.............kjjk............kjjjk............kjjjkkk..........kkkkk......................................................................'] },
-    cloud_a: { w: 32, h: 16, ms: 1, box: [4, 2, 26, 11], frames: ['.............................................................................lll...........................llmmmll........................lmmmmmmmllllll................l.lmmmmmmmmmmmmml.............llmlmmmmmmmmmmmmmmml...........lmmmmmmmmmmmmmmmmmmmml..........lmmmmmmmmmmmmmmmmmmmmmll.......lmmmmmmmmmmmmmmmmmmmmmmml........lmmmmmmmmmmmmmmmmmmmmmmml.......lmmmmmllmmmlllmmmmmmmmml.........lllll..lll...llllllllll...................................................................................................'] },
-    cloud_b: { w: 32, h: 16, ms: 1, box: [6, 4, 20, 8], frames: ['..............................................................................................................................................lll.........................l..lmmml..lll.................llmllmmmmmllmmml................lmmmmmmmmmmmmmmml..............lmmmmmmmmmmmmmmmml.............lmmmmmmlmmmllmmmmmml............lmmmmll.lll..lmmmmml............lllll.........llllll......................................................................................................................................'] },
-    star: { w: 16, h: 16, ms: 600, box: [5, 5, 5, 5], frames: ['.......................................................................................k...............f.............kfffk.............f...............k........................................................................................................', '.......................................................................................................k..............kfk..............k........................................................................................................................'] },
-    hills: { w: 32, h: 16, ms: 1, box: [0, 7, 32, 9], frames: ['..................................................................................................................................................................................................................................ooooo.........................ooooooooooo...ooo...............ooooooooooooooooooo............oooooooooooooooooooooo.........oooooooooooooooooooooooo.......oooooooooooooooooooooooooo.....oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'] },
-    tree: { w: 16, h: 16, ms: 1, box: [1, 1, 15, 15], frames: ['......................ooooo..........ooooooo........ooooooooo.......ooooooooo......ooooooooooo....ooooooooooooo...ooooooooooooo..ooooooooooooooo..ooooooooooooo...ooooooooooooo....oooooo.oooo.........oo..............oo..............oo.............oooo......'] },
-    lasagne: { w: 16, h: 16, ms: 220, box: [0, 0, 16, 16], frames: ['..........l............l...l...........l...l..........l...l..........l...l...........l...l............l............................jjkjjjkjjk......iikiiiikii......jjjjjjjjjj.....liiiiiiiiiil...llllllllllllll.llmmllllllllllll..llllllllllll.....llllllllll...', '...........l..........l...l..........l...l...........l...l............l...l............l...l...........l...........................jjkjjjkjjk......iikiiiikii......jjjjjjjjjj.....liiiiiiiiiil...llllllllllllll.llmmllllllllllll..llllllllllll.....llllllllll...', '.........l...........l...l............l...l............l...l...........l...l..........l...l..........l.............................jjkjjjkjjk......iikiiiikii......jjjjjjjjjj.....liiiiiiiiiil...llllllllllllll.llmmllllllllllll..llllllllllll.....llllllllll...'] },
-    sparkle: { w: 16, h: 16, ms: 90, box: [4, 4, 7, 7], frames: ['.......................................................................................................k..............kfk..............k........................................................................................................................', '.......................................................................................k...............f.............kfjfk.............f...............k........................................................................................................', '.......................................................................k.............k.f.k.............f............kffjffk............f.............k.f.k.............k........................................................................................', '.......................................................................k.............k...k..........................k.....k..........................k...k.............k........................................................................................'] },
-    dust: { w: 16, h: 16, ms: 110, box: [3, 11, 10, 5], frames: ['......................................................................................................................................................................................................ll.............lmml...........lmmmmll..........llllll.....', '.......................................................................................................................................................................................ll............llmml..........lmmmmmll.......lmmlmmmml........ll.llll.....', '......................................................................................................................................................................................l..l..........l..ll..l.......l.lm..ml.........l..l...l.........l...l......', '....................................................................................................................................................................................l......l...........l...........l........l............l......................'] },
-    zzz: { w: 16, h: 16, ms: 400, box: [0, 0, 15, 15], frames: ['................................................................................................................................................................................gggg..............g..............g..............gggg............................', '....................................................................................ggggg..............g..............g..............g..............ggggg.......................gggg..............g..............g..............gggg............................', '.........gggggg..............g..............g..............g..............g.........ggggggggggg........g..............g..............g..............ggggg.......................gggg..............g..............g..............gggg............................'] },
+    ground_a: { at: [0, 0], w: 16, h: 16, ms: 1, box: [0, 12, 16, 4], frames: ['................................................................................................................................................................................................aaabaaaaabaaaaaabbbbbcbbbbbbbcbbccccccccdcccccccccdcccccccccdccc'] },
+    ground_b: { at: [16, 0], w: 16, h: 16, ms: 1, box: [0, 12, 16, 4], frames: ['................................................................................................................................................................................................aaaaabaaaaaabaaabbcbbbbbbcbbbbbbccccdccccccccccccccccccccddccccc'] },
+    ground_c: { at: [32, 0], w: 16, h: 16, ms: 1, box: [0, 12, 16, 4], frames: ['................................................................................................................................................................................................aabaaaaaaaabaaaabbbbbbccbbbbbbbbccccccccccccdccccdcccccccccccccc'] },
+    grass_short: { at: [0, 16], w: 16, h: 16, ms: 450, box: [4, 12, 7, 4], frames: ['....................................................................................................................................................................................................b..b..b.........b.ba.ba.........abbabab.........eebeebe.....', '.....................................................................................................................................................................................................b..b.b.........b.ab.ab.........bababba.........eebeebe.....'] },
+    grass_medium: { at: [0, 32], w: 16, h: 16, ms: 450, box: [4, 11, 8, 5], frames: ['......................................................................................................................................................................................b...b.........b.b.b.a.........bab.bab.........ababbabb........eebeebee....', '.......................................................................................................................................................................................b...b.........b.b.ba.........bab.bab.........ababbabb........eebeebee....'] },
+    grass_tall: { at: [0, 48], w: 16, h: 16, ms: 450, box: [3, 10, 9, 6], frames: ['.....................................................................................................................................................................b....b..........b..b.b........b.ab.b.a........babb.abba.......abbababab.......eebeeebee....', '......................................................................................................................................................................b....b.........b..b.b........b.ba.b.a........babb.abba.......abbababab.......eebeeebee....'] },
+    grass_sparse: { at: [0, 64], w: 16, h: 16, ms: 450, box: [2, 12, 11, 4], frames: ['...................................................................................................................................................................................................b....b.........ba...ba..b......ab...ab..ab.....ee...ee..ee...', '..................................................................................................................................................................................................b......b........ab...ba...b.....ab...ab..ab.....ee...ee..ee...'] },
+    flower_yellow_grow: { at: [0, 80], w: 16, h: 16, ms: 260, box: [4, 6, 7, 10], frames: ['......................................................................................................................................................................................................a.a..............ba..............b..............ebe.......', '.......................................................................................................................................................f..............fff..............b...............b.a...........a.bab............ab..............ebe.......', '......................................................................................................f.f............fffff..........fffdfff..........fffff............f.f..............b...............b.a...........a.bab............ab..............ebe.......'] },
+    flower_yellow_sway: { at: [48, 80], w: 16, h: 16, ms: 420, box: [3, 6, 9, 10], frames: ['.....................................................................................................f.f............fffff..........fffdfff..........fffff............f.f..............b................b.a...........a.bab............ab..............ebe.......', '.......................................................................................................f.f............fffff..........fffdfff..........fffff............f.f..............b..............b.a...........a.bab............ab..............ebe.......'] },
+    flower_violet_grow: { at: [0, 96], w: 16, h: 16, ms: 260, box: [4, 6, 7, 10], frames: ['......................................................................................................................................................................................................a.a..............ba..............b..............ebe.......', '.......................................................................................................................................................g..............ggg..............b...............b.a...........a.bab............ab..............ebe.......', '......................................................................................................g.g............ggggg..........gggfggg..........ggggg............g.g..............b...............b.a...........a.bab............ab..............ebe.......'] },
+    flower_violet_sway: { at: [48, 96], w: 16, h: 16, ms: 420, box: [3, 6, 9, 10], frames: ['.....................................................................................................g.g............ggggg..........gggfggg..........ggggg............g.g..............b................b.a...........a.bab............ab..............ebe.......', '.......................................................................................................g.g............ggggg..........gggfggg..........ggggg............g.g..............b..............b.a...........a.bab............ab..............ebe.......'] },
+    flower_pink_grow: { at: [0, 112], w: 16, h: 16, ms: 260, box: [4, 6, 7, 10], frames: ['......................................................................................................................................................................................................a.a..............ba..............b..............ebe.......', '.......................................................................................................................................................h..............hhh..............b...............b.a...........a.bab............ab..............ebe.......', '......................................................................................................h.h............hhhhh..........hhhfhhh..........hhhhh............h.h..............b...............b.a...........a.bab............ab..............ebe.......'] },
+    flower_pink_sway: { at: [48, 112], w: 16, h: 16, ms: 420, box: [3, 6, 9, 10], frames: ['.....................................................................................................h.h............hhhhh..........hhhfhhh..........hhhhh............h.h..............b................b.a...........a.bab............ab..............ebe.......', '.......................................................................................................h.h............hhhhh..........hhhfhhh..........hhhhh............h.h..............b..............b.a...........a.bab............ab..............ebe.......'] },
+    mushroom_a: { at: [0, 128], w: 16, h: 16, ms: 1, box: [4, 9, 8, 7], frames: ['......................................................................................................................................................iiii...........ijiiii.........iiiiijii........diiiiiid..........djjd............jjjd...........djjjjd.....'] },
+    mushroom_b: { at: [16, 128], w: 16, h: 16, ms: 1, box: [5, 8, 6, 8], frames: ['.......................................................................................................................................kk.............kkkk...........kkjkkk..........dddddd............jd..............jd..............jd.............jjdd......'] },
+    mushroom_a_appear: { at: [32, 128], w: 16, h: 16, ms: 140, box: [4, 11, 8, 5], frames: ['.......................................................................................................................................................................................................................................ii............ciiiic.....', '......................................................................................................................................................................................................................iiii...........ijiiii.........ciiiiijc....', '......................................................................................................................................................................................iiii...........ijiiii.........iiiiijii........diiiiiid........c.djjd.c....'] },
+    rock_a: { at: [0, 144], w: 16, h: 16, ms: 1, box: [4, 12, 7, 4], frames: ['......................................................................................................................................................................................................lll............lmlll..........lllllln.........nllllnn.....'] },
+    rock_b: { at: [16, 144], w: 16, h: 16, ms: 1, box: [5, 13, 5, 3], frames: ['......................................................................................................................................................................................................................lml............lllln...........nllnn......'] },
+    bush: { at: [0, 160], w: 32, h: 16, ms: 1, box: [4, 3, 25, 13], frames: ['...............................................................................................................e............................eeebeee........................ebaabbbbe..e..................e.eaaaabbbbeebeee............eeebebaaaabbbbaabbbbe..........ebaabbbaaaabbbaaaabbbe..........eaaaabbbaaaabbaaaabbbe..........eaaaabbbaaaabbbaabbbbbe........ebbaabbbbaaaabbbbbbbbbbbe.......ebbbbbbbbaaaabbbbbbbbbbbe.......eeeeeeeeeeeeeeeeeeeeeeeee.......eeeeeeeeeeeeeeeeeeeeeeeee........eeeeeeeeeeeeeeee.eeeeee....'] },
+    signpost: { at: [0, 176], w: 32, h: 16, ms: 1, box: [2, 2, 28, 14], frames: ['......................................................................cc................cc............cc................cc........dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd....dddddddddddddddddddddddddddd........cc................cc............cc................cc............cc................cc............cc................cc............cc................cc............cc................cc......'] },
+    butterfly: { at: [0, 192], w: 16, h: 16, ms: 90, box: [4, 5, 7, 6], frames: ['....................................................................................ggg.ggg.........ghgdghg.........gggdggg..........ggdgg...........gh.hg............g.g.......................................................................................', '.....................................................................................................ggdgg...........ghdhg............gdg.............hgh.......................................................................................................', '......................................................................................................gdg.............gdg.............gdg..............h........................................................................................................', '....................................................................................................g..d..g.........gggdggg.........ghgdghg..........gg.gg............g.g.......................................................................................'] },
+    beetle: { at: [0, 208], w: 16, h: 16, ms: 120, box: [4, 11, 8, 5], frames: ['......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii...........l.l.l......', '......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii..........l..l..l.....', '......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii............l.l.l.....', '......................................................................................................................................................................................iii............iiniinn........iniiiinn........iiinii...........l..l..l....'] },
+    sun: { at: [0, 224], w: 16, h: 16, ms: 1, box: [1, 1, 13, 13], frames: ['.......................k...............k...........k.kkkkk.k........kkfffkk........kkfffffkk.......kfffffffk.....kkkfffffffkkk.....kfffffffk.......kkfffffkk........kkfffkk........k.kkkkk.k...........k...............k........................................'] },
+    moon: { at: [16, 224], w: 16, h: 16, ms: 1, box: [3, 3, 8, 9], frames: ['.....................................................kk.............kjk............kjk.............kjk.............kjk.............kjjk............kjjjk............kjjjkkk..........kkkkk......................................................................'] },
+    cloud_a: { at: [0, 240], w: 32, h: 16, ms: 1, box: [4, 2, 26, 11], frames: ['.............................................................................lll...........................llmmmll........................lmmmmmmmllllll................l.lmmmmmmmmmmmmml.............llmlmmmmmmmmmmmmmmml...........lmmmmmmmmmmmmmmmmmmmml..........lmmmmmmmmmmmmmmmmmmmmmll.......lmmmmmmmmmmmmmmmmmmmmmmml........lmmmmmmmmmmmmmmmmmmmmmmml.......lmmmmmllmmmlllmmmmmmmmml.........lllll..lll...llllllllll...................................................................................................'] },
+    cloud_b: { at: [32, 240], w: 32, h: 16, ms: 1, box: [6, 4, 20, 8], frames: ['..............................................................................................................................................lll.........................l..lmmml..lll.................llmllmmmmmllmmml................lmmmmmmmmmmmmmmml..............lmmmmmmmmmmmmmmmml.............lmmmmmmlmmmllmmmmmml............lmmmmll.lll..lmmmmml............lllll.........llllll......................................................................................................................................'] },
+    star: { at: [0, 256], w: 16, h: 16, ms: 600, box: [5, 5, 5, 5], frames: ['.......................................................................................k...............f.............kfffk.............f...............k........................................................................................................', '.......................................................................................................k..............kfk..............k........................................................................................................................'] },
+    hills: { at: [0, 272], w: 32, h: 16, ms: 1, box: [0, 7, 32, 9], frames: ['..................................................................................................................................................................................................................................ooooo.........................ooooooooooo...ooo...............ooooooooooooooooooo............oooooooooooooooooooooo.........oooooooooooooooooooooooo.......oooooooooooooooooooooooooo.....oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'] },
+    tree: { at: [0, 288], w: 16, h: 16, ms: 1, box: [1, 1, 15, 15], frames: ['......................ooooo..........ooooooo........ooooooooo.......ooooooooo......ooooooooooo....ooooooooooooo...ooooooooooooo..ooooooooooooooo..ooooooooooooo...ooooooooooooo....oooooo.oooo.........oo..............oo..............oo.............oooo......'] },
+    lasagne: { at: [0, 304], w: 16, h: 16, ms: 220, box: [0, 0, 16, 16], frames: ['..........l............l...l...........l...l..........l...l..........l...l...........l...l............l............................jjkjjjkjjk......iikiiiikii......jjjjjjjjjj.....liiiiiiiiiil...llllllllllllll.llmmllllllllllll..llllllllllll.....llllllllll...', '...........l..........l...l..........l...l...........l...l............l...l............l...l...........l...........................jjkjjjkjjk......iikiiiikii......jjjjjjjjjj.....liiiiiiiiiil...llllllllllllll.llmmllllllllllll..llllllllllll.....llllllllll...', '.........l...........l...l............l...l............l...l...........l...l..........l...l..........l.............................jjkjjjkjjk......iikiiiikii......jjjjjjjjjj.....liiiiiiiiiil...llllllllllllll.llmmllllllllllll..llllllllllll.....llllllllll...'] },
+    sparkle: { at: [0, 320], w: 16, h: 16, ms: 90, box: [4, 4, 7, 7], frames: ['.......................................................................................................k..............kfk..............k........................................................................................................................', '.......................................................................................k...............f.............kfjfk.............f...............k........................................................................................................', '.......................................................................k.............k.f.k.............f............kffjffk............f.............k.f.k.............k........................................................................................', '.......................................................................k.............k...k..........................k.....k..........................k...k.............k........................................................................................'] },
+    dust: { at: [0, 336], w: 16, h: 16, ms: 110, box: [3, 11, 10, 5], frames: ['......................................................................................................................................................................................................ll.............lmml...........lmmmmll..........llllll.....', '.......................................................................................................................................................................................ll............llmml..........lmmmmmll.......lmmlmmmml........ll.llll.....', '......................................................................................................................................................................................l..l..........l..ll..l.......l.lm..ml.........l..l...l.........l...l......', '....................................................................................................................................................................................l......l...........l...........l........l............l......................'] },
+    zzz: { at: [0, 352], w: 16, h: 16, ms: 400, box: [0, 0, 15, 15], frames: ['................................................................................................................................................................................gggg..............g..............g..............gggg............................', '....................................................................................ggggg..............g..............g..............g..............ggggg.......................gggg..............g..............g..............gggg............................', '.........gggggg..............g..............g..............g..............g.........ggggggggggg........g..............g..............g..............ggggg.......................gggg..............g..............g..............gggg............................'] },
   },
 } as const
 // </decor>
@@ -1571,6 +1699,21 @@ const layMeadow = (columns: number) => {
   scene.laidFor = columns * 64 + catRows()
   scene.blooms = []
   scene.mushrooms = []
+}
+
+/** Lays the meadow for this width if it is not, and lets grow what the session earned. */
+const tend = (columns: number) => {
+  if (scene.laidFor !== columns * 64 + catRows()) layMeadow(columns)
+  // A bloom a finished todo, a mushroom a failed call, each in its plot.
+  while (scene.blooms.length < Math.min(scene.done, scene.plots.length)) {
+    scene.blooms.push({ x: scene.plots[scene.blooms.length] ?? 0, kind: scene.blooms.length % BLOOMS.length, born: scene.clock })
+  }
+  scene.blooms.length = Math.min(scene.blooms.length, scene.done)
+  const spare = scene.plots.slice(Math.min(scene.done, scene.plots.length)).reverse()
+  while (scene.mushrooms.length < Math.min(scene.fails, spare.length, 6)) {
+    scene.mushrooms.push({ x: spare[scene.mushrooms.length] ?? 0, kind: scene.mushrooms.length % MUSHROOMS.length, born: scene.clock })
+  }
+  scene.mushrooms.length = Math.min(scene.mushrooms.length, scene.fails)
 }
 
 /** Where the cat's head is, in cells: what it says and raises starts there. */
@@ -1708,7 +1851,7 @@ const stepScene = (ms: number) => {
  * (the wave, what the cat says) goes over the cells last.
  */
 const spriteStrip = (columns: number, ground: string, ink: string, mood: string) => {
-  if (scene.laidFor !== columns * 64 + catRows()) layMeadow(columns)
+  tend(columns)
   const base = rgb(ground)
   const pen = rgb(ink)
   const rows = stripRows()
@@ -1767,16 +1910,6 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
   }
 
   // Behind the cat: what grew, and the dish.
-  // A bloom a finished todo, a mushroom a failed call, each in its plot.
-  while (scene.blooms.length < Math.min(scene.done, scene.plots.length)) {
-    scene.blooms.push({ x: scene.plots[scene.blooms.length] ?? 0, kind: scene.blooms.length % BLOOMS.length, born: scene.clock })
-  }
-  scene.blooms.length = Math.min(scene.blooms.length, scene.done)
-  const spare = scene.plots.slice(Math.min(scene.done, scene.plots.length)).reverse()
-  while (scene.mushrooms.length < Math.min(scene.fails, spare.length, 6)) {
-    scene.mushrooms.push({ x: spare[scene.mushrooms.length] ?? 0, kind: scene.mushrooms.length % MUSHROOMS.length, born: scene.clock })
-  }
-  scene.mushrooms.length = Math.min(scene.mushrooms.length, scene.fails)
   for (const one of scene.blooms) {
     const [grow, sway] = BLOOMS[one.kind] ?? BLOOMS[0]!
     const age = scene.clock - one.born
@@ -3780,7 +3913,7 @@ export const register: Register = on => {
             cells={petStrip(room, tone.panel, tone.text, mood)}
           />
         )}
-        {isSvg && Svg !== undefined && <Svg source={catSvg(tone.panel)} alt="Le chat du pane" />}
+        {isSvg && Svg !== undefined && <Svg source={sceneSvg(tone.panel)} alt="Le chat du pane dans sa prairie" />}
         {style === 'png' && Image !== undefined && (
           <Box key="pet" flexDirection="row" width="100%" height={PNG_ROWS}>
             <Box width={stage.left} flexShrink={0} />
