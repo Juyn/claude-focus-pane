@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { BoxProps, ElementConstructor, EngineInterface, Register, TextProps, Timer } from 'claude-code'
 
-import type { Board, Doc, Feature, FeedRow, Gallery, Focus, Skin, Todo, TurnState, Usage } from '../types'
+import type { Board, Doc, Feature, FeedRow, Gallery, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
 
@@ -59,7 +59,7 @@ const turn = atom({ plugin: 'focus-pane', key: 'turn' } as const, {
 const board = atom({ plugin: 'focus-pane', key: 'board' } as const, { notes: [], chores: [], serial: 0 })
 const feature = atom({ plugin: 'focus-pane', key: 'feature' } as const, null)
 const gallery = atom({ plugin: 'focus-pane', key: 'gallery' } as const, { status: 'idle', path: null, shots: [] })
-const hasPet = atom({ plugin: 'focus-pane', key: 'hasPet' } as const, true)
+const petStyle = atom({ plugin: 'focus-pane', key: 'petStyle' } as const, 'line')
 const skin = atom({ plugin: 'focus-pane', key: 'skin' } as const, 'dark')
 const command = atom({ plugin: 'focus-pane', key: 'command' } as const, null)
 
@@ -181,6 +181,50 @@ const pace = ($: EngineInterface, isWorking: boolean) => {
     $.ui.invalidate('ui.render')
   })
 }
+
+/**
+ * The sitting cat, in line art: every character one cell wide, so the drawing
+ * holds in any monospace font. `eyes` and `tail` are swapped in as it lives.
+ */
+const LINE_CAT = [
+  '      />     ﾌ',
+  '      |  EYES |',
+  '     /` ﾐ_x ﾉ',
+  '    /       |',
+  '   /   \\    ﾉ',
+  '   |   | | |',
+  ' /‾|   | | |',
+  ' | (‾\\__\\_)__)',
+  'TAIL',
+] as const
+const LINE_COLUMNS = 16
+const LINE_ROWS = LINE_CAT.length
+
+/** The sitting cat's nine lines, pushed `left` columns in, as it feels now. */
+const lineCat = (columns: number, isWorking: boolean, mood: string) => {
+  const span = Math.max(1, columns - LINE_COLUMNS - 2)
+  const lap = ((pet.x % (span * 2)) + span * 2) % (span * 2)
+  const left = ' '.repeat(lap < span ? lap : span * 2 - lap)
+  // Dozing at rest, wide awake in a turn, a blink now and then.
+  const eyes = pet.isAsleep ? '-  -' : pet.step % 7 === 0 ? '-  -' : isWorking ? 'o  o' : '_  _'
+  const tail = pet.isAsleep || pet.step % 2 === 0 ? ' \\=⊃' : ' \\_⊃'
+
+  return LINE_CAT.map((row, at) => {
+    const drawn = row.replace('EYES', eyes).replace('TAIL', tail)
+
+    return `${left}${drawn}${at === 0 && mood ? `  ${mood}` : ''}`
+  })
+}
+
+/** `line`, `pixel` or `off`, from a command or the store; `on` and old booleans too. */
+const asPetStyle = (value: unknown): PetStyle | null =>
+  value === 'line' || value === 'pixel' || value === 'off'
+    ? value
+    : value === 'on' || value === true
+      ? 'line'
+      : value === false
+        ? 'off'
+        : null
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 const sextet = (word: number, shift: number) => ALPHABET[(word >> shift) & 63] ?? ''
@@ -451,7 +495,7 @@ const skinOf = (value: unknown): Skin => {
  */
 const COMMAND = {
   description: 'Rouvre et cadre le pane Unlocker',
-  argumentHint: 'auto | mission <texte> | spec <feature|off> | pet <on|off> | demo | UNL-1234 <texte>',
+  argumentHint: 'auto | mission <texte> | spec <feature|off> | pet <line|pixel|off> | demo | UNL-1234 <texte>',
 }
 
 const claimCommand = async ($: EngineInterface, isFreshLoad = false) => {
@@ -850,7 +894,8 @@ export const register: Register = on => {
 
     await wearTheme($).catch(() => undefined)
     await meterUsage($).catch(() => undefined)
-    if ((await $.store.get('pet').catch(() => null)) === false) await update($, hasPet, () => false)
+    const style = asPetStyle(await $.store.get('pet').catch(() => null))
+    if (style !== null) await update($, petStyle, () => style)
     pace($, false)
 
     const saved = await shelf($)
@@ -916,11 +961,17 @@ export const register: Register = on => {
     }
 
     if (args === 'pet' || args.startsWith('pet ')) {
-      const isOn = args.slice('pet'.length).trim() !== 'off'
-      await update($, hasPet, () => isOn)
-      await $.store.set('pet', isOn).catch(() => undefined)
+      const style = asPetStyle(args.slice('pet'.length).trim() || 'line')
+      if (style === null) return { text: 'Focus pane: pet line | pixel | off.' }
+      await update($, petStyle, () => style)
+      await $.store.set('pet', style).catch(() => undefined)
 
-      return { text: isOn ? 'Focus pane: le chat est de retour.' : 'Focus pane: le chat est rentré.' }
+      return {
+        text:
+          style === 'off'
+            ? 'Focus pane: le chat est rentré.'
+            : `Focus pane: le chat est là (${style === 'line' ? 'au trait' : 'en pixels'}).`,
+      }
     }
 
     if (args === 'demo') {
@@ -1423,10 +1474,20 @@ export const register: Register = on => {
     const briefLines = (said: string | null) =>
       Math.min(BRIEF_LINES, Math.max(1, Math.ceil((said ?? '').length / briefWidth)))
 
-    // The cat is a Raster on a painted ground: without either, it stays in.
+    // The pixel cat is a Raster on a painted ground; without either, the line cat
+    // takes its place, being plain text.
     const Raster = 'Raster' in table ? table.Raster : undefined
-    const walks = (await read($, hasPet)) && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined
-    const petRows = walks ? PET_ROWS : 0
+    const asked: PetStyle = await read($, petStyle)
+    const canPixel = Raster !== undefined && tone.panel !== undefined && tone.text !== undefined
+    const style: PetStyle = asked === 'pixel' && !canPixel ? 'line' : asked
+    const petRows = style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
+    const mood = pet.isAsleep
+      ? 'z'
+      : pet.moodTicks > 0
+        ? pet.mood
+        : spent.percent !== null && spent.percent >= 80
+          ? "'"
+          : ''
 
     const rowsOf = (outlines: number, todosKept: number, share: number) => {
       const paperRows = (one: Doc) =>
@@ -1803,24 +1864,22 @@ export const register: Register = on => {
         {todoList}
         {activity}
         {desk}
-        {walks && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
+        {style === 'pixel' && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
           <Raster
             key="pet"
             columns={room}
             rows={PET_ROWS}
-            cells={petStrip(
-              room,
-              tone.panel,
-              tone.text,
-              pet.isAsleep
-                ? 'z'
-                : pet.moodTicks > 0
-                  ? pet.mood
-                  : spent.percent !== null && spent.percent >= 80
-                    ? "'"
-                    : '',
-            )}
+            cells={petStrip(room, tone.panel, tone.text, mood)}
           />
+        )}
+        {style === 'line' && (
+          <Box key="pet" flexDirection="column" width="100%">
+            {lineCat(room, state.isRunning, mood).map(row => (
+              <Text color={tone.text} backgroundColor={tone.panel} wrap="truncate-end">
+                {row}
+              </Text>
+            ))}
+          </Box>
         )}
         {footer}
       </Box>

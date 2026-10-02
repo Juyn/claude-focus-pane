@@ -570,20 +570,7 @@ test('the feed names an MCP call by its server and tool, a shell call by its pur
   expect(await pane.find({ text: /Simuler le script SQL/ })).toBeDefined()
 })
 
-test('the cat walks a strip as wide as the pane, and stays in under an ansi theme', async ($, on) => {
-  engine(on)
-  const pane = await mounted($, 100)
-  const strip = await pane.find({ key: 'pet' })
-
-  expect(strip?.props.columns).toBe(98)
-  expect(strip?.props.rows).toBe(3)
-  await pane.unmount()
-
-  await wear($, 'dark-ansi')
-  expect(await (await mounted($, 100)).find({ key: 'pet' })).toBeUndefined()
-})
-
-test('pet off sends the cat in', async ($, on) => {
+const start = async ($: Engine, on: On) => {
   engine(on)
   on('command.list', () => ({ value: [] }))
   on('command.register', ($$, e) => ({ value: { command: e.name } }))
@@ -595,8 +582,36 @@ test('pet off sends the cat in', async ($, on) => {
     value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
   await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
+}
 
-  await $.command.run({ command: 'mission', args: 'pet off', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+const petCommand = ($: Engine, style: string) =>
+  $.command.run({ command: 'mission', args: `pet ${style}`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+
+test('the line cat sits at the bottom of the pane, in any theme', async ($, on) => {
+  engine(on)
+  const pane = await mounted($, 100)
+
+  expect((await pane.find({ key: 'pet' }))?.text).toMatch(/ﾐ_x ﾉ/)
+  expect(await pane.find({ type: 'Raster' })).toBeUndefined()
+  await pane.unmount()
+
+  await wear($, 'dark-ansi')
+  expect(await (await mounted($, 100)).find({ key: 'pet' })).toBeDefined()
+})
+
+test('pet pixel walks the pixel cat on a strip as wide as the pane', async ($, on) => {
+  await start($, on)
+  await petCommand($, 'pixel')
+  const strip = await (await mounted($, 100)).find({ key: 'pet' })
+
+  expect(strip?.type).toBe('Raster')
+  expect(strip?.props.columns).toBe(98)
+  expect(strip?.props.rows).toBe(3)
+})
+
+test('pet off sends the cat in', async ($, on) => {
+  await start($, on)
+  await petCommand($, 'off')
 
   expect(await (await mounted($, 100)).find({ key: 'pet' })).toBeUndefined()
 })

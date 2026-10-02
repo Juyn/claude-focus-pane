@@ -57,6 +57,9 @@ export type Feature = {
   docs: Doc[]
 }
 
+/** How the cat at the bottom of the pane is drawn: line art, pixels, or not at all. */
+export type PetStyle = 'line' | 'pixel' | 'off'
+
 /** The mockups tab: the screens of the bound mockup, shot once by thumbs.py. */
 export type Gallery = {
   status: 'idle' | 'loading' | 'ready' | 'failed'
@@ -108,8 +111,7 @@ declare module 'claude-code' {
       board: Board
       feature: Feature | null
       gallery: Gallery
-      /** False once the person sent the cat in with `pet off`. */
-      hasPet: boolean
+      petStyle: PetStyle
       turn: TurnState
       skin: Skin
       /** The slash command the engine actually granted, or null while it has none. */
