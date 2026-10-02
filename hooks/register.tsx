@@ -1283,6 +1283,8 @@ const SCENE = {
   mote: 0x4a5573,
   bug: 0x9bd45a,
   ember: [0xf2a45b, 0xe2843a, 0xb9622a],
+  swarm: [0xe2843a, 0xf2a45b, 0x4a58c8, 0x8a6f9e, 0x8d8a94, 0xb9622a],
+  star: 0xf7d154,
   spark: [0xf7e27a, 0xfff3c0],
   hurt: [0xff6b7a, 0xc8283a],
 }
@@ -1292,6 +1294,9 @@ type Speck = { x: number; y: number; dx: number; dy: number; age: number; life: 
 
 /** A glyph standing in the scene: a blade of grass, a bloom, a mote. */
 type Prop = { x: number; row: number; glyph: number; color: number }
+
+/** A cloud of squares that crosses the air as one, its squares winking in and out. */
+type Swarm = { x: number; dx: number; cells: { ox: number; oy: number; color: number; beat: number }[] }
 
 /** The scene around the cat: module values, as the cat's own are. */
 const scene = {
@@ -1303,6 +1308,10 @@ const scene = {
   bugX: 0,
   /** Until when, on the scene's clock, the lasagne is out and the cat beside itself. */
   feastUntil: 0,
+  /** Clouds of squares adrift in the air while the feast lasts. */
+  swarms: [] as Swarm[],
+  /** Where the stars twinkle, laid with the swarms. */
+  stars: [] as Prop[],
   /** The props laid for a strip this wide, and that width. */
   props: [] as Prop[],
   laidFor: 0,
@@ -1337,6 +1346,37 @@ const DISH_ROWS = LASAGNE.length / 2
 /** Serves the lasagne, or clears the table. */
 const feast = (isServed: boolean) => {
   scene.feastUntil = isServed ? scene.clock + FEAST_MS : 0
+  scene.swarms = []
+  scene.stars = []
+  if (isServed) {
+    // A cloud every twenty columns or so, tall as the air, and stars between.
+    const columns = stage.columns || 80
+    const air = Math.max(3, catRows() - 1)
+    for (let x = 4; x < columns; x += 16 + Math.floor(Math.random() * 10)) {
+      const cells: Swarm['cells'] = []
+      for (let oy = 0; oy < air; oy += 1) {
+        for (let ox = 0; ox < 4; ox += 1) {
+          if (Math.random() < 0.42) {
+            cells.push({
+              ox,
+              oy,
+              color: SCENE.swarm[Math.floor(Math.random() * SCENE.swarm.length)] ?? 0,
+              beat: Math.floor(Math.random() * 6),
+            })
+          }
+        }
+      }
+      scene.swarms.push({ x, dx: (Math.random() < 0.5 ? -1 : 1) * (0.12 + Math.random() * 0.22), cells })
+    }
+    for (let k = 0; k < Math.floor(columns / 7); k += 1) {
+      scene.stars.push({
+        x: Math.floor(Math.random() * columns),
+        row: Math.floor(Math.random() * air),
+        glyph: glyphOf(k % 3 === 0 ? '*' : '✦'),
+        color: SCENE.star,
+      })
+    }
+  }
   actor.isCalled = true
   pet.isAsleep = false
   scene.isDirty = true
@@ -1463,31 +1503,12 @@ const stepScene = (ms: number) => {
     hasMoved = true
   }
   if (isFeasting()) {
-    // Squares of dust streaming off its heels, and more adrift over the meadow.
+    // The swarms drift across the air, each at its own pace, and come round again.
     const columns = stage.columns || 80
-    const head = headAt(columns)
-    const pick = (from: readonly number[]) => [from[Math.floor(Math.random() * from.length)] ?? 0]
-    scene.specks.push({
-      x: head.x - actor.heading * (catColumns() / 2 + Math.random() * 6),
-      y: catRows() - 1 - Math.random() * (catRows() / 2),
-      dx: -actor.heading * (0.5 + Math.random() * 0.7),
-      dy: -Math.random() * 0.06,
-      age: 0,
-      life: 350 + Math.random() * 450,
-      glyph: glyphOf('■'),
-      colors: SCENE.ember,
-    })
-    if (Math.random() < 0.35) {
-      scene.specks.push({
-        x: Math.random() * columns,
-        y: Math.random() * (catRows() - 2),
-        dx: (Math.random() - 0.5) * 0.3,
-        dy: (Math.random() - 0.5) * 0.1,
-        age: 0,
-        life: 500 + Math.random() * 900,
-        glyph: glyphOf('■'),
-        colors: pick(SCENE.ember),
-      })
+    for (const one of scene.swarms) {
+      one.x += one.dx
+      if (one.x > columns + 4) one.x = -6
+      else if (one.x < -6) one.x = columns + 4
     }
     hasMoved = true
   }
@@ -1542,6 +1563,19 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
   for (const one of scene.specks) {
     const shade = one.colors[Math.min(one.colors.length - 1, Math.floor((one.age / one.life) * one.colors.length))]
     put(Math.round(one.y), Math.round(one.x), one.glyph, shade ?? pen)
+  }
+
+  // The air of a feast: stars that twinkle, and the swarms of squares crossing it.
+  if (isFeasting()) {
+    const wink = Math.floor(scene.clock / 240)
+    scene.stars.forEach((one, k) => {
+      if ((wink + k) % 4 !== 0) put(one.row, one.x, one.glyph, one.color)
+    })
+    for (const swarm of scene.swarms) {
+      for (const one of swarm.cells) {
+        if ((wink + one.beat) % 6 < 4) put(one.oy, Math.round(swarm.x) + one.ox, glyphOf('■'), one.color)
+      }
+    }
   }
 
   // The lasagne, steaming, toward the right end: the cat runs past in front of it.
