@@ -136,6 +136,10 @@ a sheet that is not a drawing but a program:
 Raster cell takes no character beyond the Basic Multilingual Plane, which rules sextants out, and a
 quadrant's pixel is twice as tall as wide, which squeezes a square sheet.
 
+A Raster paints 1024 distinct pairs of colors and rounds everything past that to a coarse palette, the
+whole picture with it: an animation must draw from a bounded set of colors, so fades go in a few
+steps, never a new shade a frame.
+
 `hooks/register.tsx` is the module, `types/index.d.ts` its state contract, `scripts/thumbs.py` the
 thumbnail shooter (cached in `~/.cache/focus-pane`). With `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` an edit
 reloads the mod when the turn that made it ends. `.claude-plugin/types/` is written by the engine

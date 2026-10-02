@@ -413,7 +413,8 @@ const renderCat = (pose: Pose) => {
       const ny = field(x, y + e, z) - field(x, y - e, z)
       const nz = field(x, y, z + e) - field(x, y, z - e)
       const n = Math.hypot(nx, ny, nz) || 1
-      const lit = 0.42 + 0.7 * Math.max(0, (nx * lx + ny * ly + nz * lz) / n)
+      // Light in six steps: a smooth shade would be a color a pixel.
+      const lit = 0.42 + 0.7 * (Math.round(Math.max(0, (nx * lx + ny * ly + nz * lz) / n) * 6) / 6)
       const coat = catCoat(x, y, z, pose)
       const tone = (at: number) => Math.min(255, Math.round((coat[at] ?? 0) * lit))
       out[j * CAT3_W + i] = (tone(0) << 16) | (tone(1) << 8) | tone(2)
@@ -2178,7 +2179,8 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
         const peak = middle + swing * middle * 0.9
         for (let row = 0; row < air; row += 1) {
           const glow = 1 - Math.abs(row - peak) / 1.7
-          if (glow > 0.12) put(row, x, glyphOf('■'), lit(hue + crest * 150, glow, base), base, false)
+          // Twelve hues, three glows: the Raster has only so many colors to give.
+          if (glow > 0.12) put(row, x, glyphOf('■'), lit(Math.round((hue + crest * 150) / 30) * 30, Math.ceil(glow * 3) / 3, base), base, false)
         }
       }
     }
@@ -2550,9 +2552,15 @@ const stepBao = (ms: number, isWorking: boolean) => {
   bao.parts = bao.parts.filter(one => one.life > 0)
 }
 
-/** Two colors mixed: `share` of the first over the second. */
-const baoMix = (over: number, under: number, share: number) => {
+/**
+ * Two colors mixed: `share` of the first over the second, in eighths. A Raster
+ * paints 1024 distinct color pairs and rounds the rest to a coarse palette, sky
+ * and all: a fade that made a new color every frame used them up in seconds.
+ */
+const baoMix = (over: number, under: number, level: number) => {
+  const share = Math.round(level * 8) / 8
   if (share >= 1) return over
+  if (share <= 0) return under
   const blend = (shift: number) => Math.round(((under >> shift) & 255) + (((over >> shift) & 255) - ((under >> shift) & 255)) * Math.max(0, share))
 
   return (blend(16) << 16) | (blend(8) << 8) | blend(0)
@@ -2708,7 +2716,8 @@ const baoStrip = (columns: number) => {
     }
   }
   for (const one of bao.parts) {
-    const share = Math.min(1, one.life * 2)
+    // No fade: a part is there, then gone. Each shade of a fade would be a color more.
+    const share = 1
     if (one.isHeart) {
       BAO_HEART.forEach((row, y) => {
         for (let x = 0; x < row.length; x += 1) if (row[x] === 'X') cell(one.x + x - 2, one.y + y, one.color, 1, 1, share)
@@ -2738,7 +2747,7 @@ const baoStrip = (columns: number) => {
   if (bao.level !== null && bao.t - bao.level.at < 2.4) {
     const age = bao.t - bao.level.at
     const title = `niveau ${bao.level.n}`
-    write(Math.round((columns - title.length) / 2), 5 - Math.round(age * 0.4), title, Math.floor(age * 8) % 2 === 1 ? 0xfcd1ff : 0xffbf49, Math.min(1, (2.4 - age) * 2))
+    write(Math.round((columns - title.length) / 2), 5 - Math.round(age * 0.4), title, Math.floor(age * 8) % 2 === 1 ? 0xfcd1ff : 0xffbf49)
   }
 
   // What Bao says, typed out a letter at a time, in a black frame beside it.
@@ -2766,7 +2775,7 @@ const baoStrip = (columns: number) => {
   }
 
   // A reward flashes the whole scene white for an instant.
-  const glare = bao.flash > 0 ? bao.flash * 0.5 : 0
+  const glare = bao.flash > 0.2 ? 0.25 : bao.flash > 0 ? 0.125 : 0
   const total = columns * BAO_ROWS
   const words = new Uint32Array(total * 3)
   for (let row = 0; row < BAO_ROWS; row += 1) {
