@@ -116,9 +116,10 @@ claude plugin test .
 
 The sprite cat is `assets/cat-sheet.png` (64×36 frames, described by `assets/cat-sheet.json`; the
 earlier 32×24 sheet is kept under `assets/v1-32x24/`), baked
-into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet. A sheet of
-64×36 frames (512×252, same manifest with `frameWidth` 64 and `frameHeight` 36) is drawn in sextants,
-six pixels a cell and two colors a cell: three times the detail at the same size on screen.
+into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet. A 64×36 sheet
+is squeezed to 64×24 at bake time and drawn in quadrants, four pixels and two colors a cell: twice
+the detail across at the same size on screen. Sextants would keep all 36 rows, but a Raster cell
+refuses any character beyond the Basic Multilingual Plane.
 
 `hooks/register.tsx` is the module, `types/index.d.ts` its state contract, `scripts/thumbs.py` the
 thumbnail shooter (cached in `~/.cache/focus-pane`). With `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` an edit

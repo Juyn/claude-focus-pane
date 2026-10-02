@@ -5,8 +5,10 @@ The hooks module has no image decoder and reads no file while drawing, so the
 sheet rides in the source: a palette, and one string a frame, one character a
 pixel (`.` is transparent). Run it again whenever the sheet changes.
 
-A sheet of 32x24 frames is drawn in half blocks, one pixel a half cell; one of
-64x36 frames in sextants, six pixels a cell, at the same size on screen.
+A sheet of 32x24 frames is drawn in half blocks, one pixel a half cell. One of
+64x36 frames is squeezed to 64x24 here and drawn in quadrants, four pixels a
+cell: twice the detail across at the same size on screen. (Sextants would keep
+all 36 rows, but a Raster cell takes no character beyond the BMP.)
 """
 import json, os, subprocess, sys
 
@@ -15,8 +17,12 @@ manifest = sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, 'assets', 'c
 sheet = json.load(open(manifest))
 width, height = sheet['frameWidth'], sheet['frameHeight']
 across = sheet['columns'] * width
+squeeze = []
+if (width, height) == (64, 36):
+    height = 24
+    squeeze = ['-filter', 'point', '-resize', f"{across}x{sheet['rows'] * height}!"]
 raw = subprocess.run(
-    ['magick', os.path.join(os.path.dirname(os.path.abspath(manifest)), sheet['image']), '-depth', '8', 'rgba:-'],
+    ['magick', os.path.join(os.path.dirname(os.path.abspath(manifest)), sheet['image']), *squeeze, '-depth', '8', 'rgba:-'],
     capture_output=True, check=True).stdout
 assert len(raw) == across * sheet['rows'] * height * 4, 'the sheet is not the size its manifest says'
 
