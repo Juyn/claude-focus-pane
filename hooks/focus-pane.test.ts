@@ -711,12 +711,21 @@ test('on the desktop the cat and its meadow are one self-playing Svg', async ($,
   expect(await pane.find({ type: 'Raster' })).toBeUndefined()
 })
 
-test('cat panda walks the panda, drawn from nothing by scripts/draw-panda.py', async ($, on) => {
+test('cat panda opens the panda its own world, and plants bamboo in it', async ($, on) => {
   await start($, on)
   const told = await $.command.run({ command: 'mission', args: 'cat panda', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
-  await petCommand($, 'big')
-  const strip = await (await mounted($, 100)).find({ key: 'pet' })
+  const pane = await mounted($, 100)
+  const strip = await pane.find({ key: 'pet' })
 
   expect(told.text).toMatch(/le panda entre en scène/)
-  expect(strip?.props.rows).toBe(20)
+  // On a terminal the panda has a world of its own, 15 rows tall, and a key to plant bamboo in it.
+  expect(strip?.type).toBe('Raster')
+  expect(strip?.props.rows).toBe(15)
+  expect((await pane.find({ key: 'bao:plant' }))?.props.hotkey).toBe('b')
+
+  await pane.press({ key: 'bao:plant' })
+  const planted = await $.command.run({ command: 'mission', args: 'bambou', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  expect(planted.text).toMatch(/pousse de bambou/)
+  await pane.unmount()
+  expect((await (await mounted($, 100)).find({ key: 'pet' }))?.type).toBe('Raster')
 })

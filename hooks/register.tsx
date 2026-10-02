@@ -162,10 +162,13 @@ const feel = (mood: string) => {
   actor.react = mood === '!' ? 'alert' : 'happy'
   if (mood === '!') {
     burst(7, 'x', SCENE.hurt, 0.5)
+    if (stage.isBao) baoBurst(bao.x + 7, BAO_GROUND - 9, 14, 0.7, SCENE.hurt)
     say('Aïe.', 2500)
   } else {
     play('sparkle', 3)
-    say('Une de moins !', 3000)
+    // In the panda's world a finished todo is a sprout to go and eat.
+    if (stage.isBao) baoPlant()
+    else say('Une de moins !', 3000)
   }
   pet.mood = mood
   pet.moodTicks = 4
@@ -439,6 +442,8 @@ const stage = {
   root: '',
   /** True where the cat is one Svg, redrawn when what it does changes: the desktop. */
   isSvg: false,
+  /** True while the panda is out on a terminal: it has a world of its own. */
+  isBao: false,
 }
 
 /**
@@ -562,6 +567,15 @@ const animate = ($: EngineInterface, isWorking: boolean) => {
           $.ui.toast(`focus-pane : pas d'image dans ce terminal (${told.deny}) — chat en sprites`)
           $.ui.invalidate('ui.render')
         })
+        .catch(() => undefined)
+
+      return
+    }
+    if (stage.isBao) {
+      stepBao(SPRITE_TICK_MS, isWorking)
+      stepScene(SPRITE_TICK_MS)
+      void $.ui
+        .blit({ requestId: PANE, key: 'pet', columns: stage.columns, rows: BAO_ROWS, cells: baoStrip(stage.columns) })
         .catch(() => undefined)
 
       return
@@ -1778,6 +1792,7 @@ const scene = {
   /** What the cat says, wrapped, and until when on the scene's clock. */
   lines: [] as string[],
   saysUntil: 0,
+  saidAt: 0,
   /** Until when, on the scene's clock, the lasagne is out and the cat beside itself. */
   feastUntil: 0,
   /** The grass laid for a strip this wide and a cat this size. */
@@ -1966,6 +1981,7 @@ const say = (text: string, ms = 7000) => {
     lines.splice(BUBBLE_LINES - 1, lines.length, `${last}...`)
   }
   scene.lines = lines
+  scene.saidAt = scene.clock
   scene.saysUntil = scene.clock + ms
   scene.isDirty = true
 }
@@ -2206,6 +2222,570 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
     words[at * 3] = glyphs[at] ?? 0x20
     words[at * 3 + 1] = fore[at] ?? base
     words[at * 3 + 2] = back[at] ?? base
+  }
+
+  return toBase64(new Uint8Array(words.buffer))
+}
+
+// ------------------------------------------------------------ bao's universe
+
+/**
+ * The panda's own world, after the design "Univers · Bao le panda": a bamboo
+ * grove by the water, at night. One cell of the design is one pixel here, two
+ * to a terminal row. Bao wanders, rolls to a sprout as a ball, eats it and is
+ * rewarded; a sprout comes up for each todo finished, or on request.
+ */
+const BAO_TALL = 30
+const BAO_ROWS = BAO_TALL / 2
+const BAO_GROUND = 23
+
+const BAO_HEAD = [
+  '.KK........KK.',
+  'KKKKWWWWWWKKKK',
+  '.KKWWWWWWWWKK.',
+  '.WWWWWWWWWWWW.',
+  'WWKKKWWWWKKKWW',
+  'EYES',
+  'WKKKWWWWWWKKKW',
+  'WPWWWWKKWWWWPW',
+  'MOUTH',
+  '..GWWWWWWWWG..',
+] as const
+const BAO_BODY = ['.KKKWWWWWWKKK.', 'KKKKWWWWWWKKKK', 'KKKWWWWWWWWKKK', '.KKWWWWWWWWKK.'] as const
+const BAO_LEGS = {
+  a: ['..KKKK..KKKK..', '..KKK....KKK..'],
+  b: ['..KKKK..KKKK..', '...KK....KKK..'],
+  c: ['..KKKK..KKKK..', '..KKK....KK...'],
+  sit: ['.KKKKWWWWKKKK.', 'KKKK......KKKK'],
+} as const
+const BAO_EYES = { c: 'WKKEKWWWWKEKKW', r: 'WKKKEWWWWKKKEW', l: 'WEKKKWWWWEKKKW', x: 'WKKKKWWWWKKKKW' } as const
+const BAO_INK: Record<string, number> = { K: 0x0b0b0c, W: 0xf2efe8, G: 0xc9c5bc, P: 0xfcd1ff, E: 0xf2efe8 }
+const BAO_NIGHT = {
+  sky: 0x272b34,
+  hillBack: 0x2e3540,
+  hillFront: 0x333b47,
+  rim: 0x3d4452,
+  stalkBack: 0x2f4a40,
+  nodeBack: 0x28403a,
+}
+const BAO_SAYS = {
+  roll: ['mode boule activé.', 'roulade !', 'trop lent à pied.'],
+  land: ['réception parfaite.', '10/10 du jury.', 'encore une ?'],
+  walk: ['sprint en cours.', 'direction : le bambou le plus proche.', 'pas de course, pas de bruit.'],
+  idle: ['vent faible. feuilles calmes.', 'je compte les lucioles : {n}.', 'rien à signaler.'],
+  eat: ['bambou frais. humeur : excellente.', 'crunch. crunch.', 'pousse livrée, pousse mangée.'],
+  sleep: ['sieste planifiée.', 'ne pas déranger.'],
+} as const
+const BAO_CONFETTI = [0xfcd1ff, 0x7996ff, 0x3fcc8c, 0xffbf49, 0xf2efe8]
+/** A heart five pixels across, for a reward. */
+const BAO_HEART = ['.X.X.', 'XXXXX', '.XXX.', '..X..'] as const
+
+/** Something adrift in Bao's world, in cells: a square, a word, a heart, a ring, a leaf. */
+type BaoPart = {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  life: number
+  color: number
+  falls?: true
+  text?: string
+  isHeart?: true
+  isRing?: true
+  leaf?: number
+}
+type BaoStalk = { x: number; h: number; phase: number; isBack: boolean }
+type BaoSprout = { x: number; grown: number }
+
+/** Bao and its world, between two frames: module values, as the cats' are. */
+const bao = {
+  t: 0,
+  columns: 0,
+  x: 10,
+  goal: 20,
+  state: 'walk' as 'walk' | 'roll' | 'idle' | 'eat' | 'sleep',
+  timer: 0,
+  leg: 0,
+  blink: 0,
+  chew: 0,
+  hop: 0,
+  heading: 1,
+  angle: 0,
+  target: null as BaoSprout | null,
+  parts: [] as BaoPart[],
+  sprouts: [] as BaoSprout[],
+  stars: [] as { x: number; y: number; glyph: string; phase: number }[],
+  hillBack: [] as number[],
+  hillFront: [] as number[],
+  stalksBack: [] as BaoStalk[],
+  stalks: [] as BaoStalk[],
+  soil: [] as number[],
+  flies: [] as { x: number; y: number; phase: number; speed: number }[],
+  score: 0,
+  combo: 0,
+  ateAt: -99,
+  flash: 0,
+  pop: 0,
+  level: null as { n: number; at: number } | null,
+  /** What is due a little later on Bao's clock: the fireworks of a new level. */
+  later: [] as { at: number; run: () => void }[],
+}
+
+const baoPick = <T,>(from: readonly T[]) => from[Math.floor(Math.random() * from.length)] as T
+const baoBetween = (low: number, high: number) => low + Math.random() * (high - low)
+
+/** Lays the grove for a strip this wide: stars, hills, stalks, soil, fireflies. */
+const baoLay = (columns: number) => {
+  bao.columns = columns
+  bao.stars = Array.from({ length: Math.floor(columns / 5) }, () => ({
+    x: Math.floor(baoBetween(0, columns)),
+    y: Math.floor(baoBetween(2, 10)),
+    glyph: baoPick(['*', '.', '.', '+', ':']),
+    phase: baoBetween(0, 6),
+  }))
+  bao.hillBack = Array.from({ length: columns }, (_unused, at) =>
+    Math.max(0, Math.round(3 + 2.5 * Math.sin(at / 9) + 2 * Math.sin(at / 4.3 + 1))),
+  )
+  bao.hillFront = Array.from({ length: columns }, (_unused, at) => Math.max(0, Math.round(1.5 + 1.5 * Math.sin(at / 6 + 2))))
+  const grove = (count: number, isBack: boolean): BaoStalk[] =>
+    Array.from({ length: count }, () => ({
+      x: Math.floor(baoBetween(1, columns - 1)),
+      h: Math.floor(isBack ? baoBetween(7, 14) : baoBetween(10, 20)),
+      phase: baoBetween(0, 6),
+      isBack,
+    }))
+  const count = Math.max(4, Math.round(columns / 11))
+  bao.stalksBack = grove(Math.round(count * 1.6), true)
+  bao.stalks = grove(count, false)
+  bao.soil = Array.from({ length: columns * 5 }, () => Math.random())
+  bao.flies = Array.from({ length: Math.max(4, Math.floor(columns / 14)) }, () => ({
+    x: baoBetween(0, columns),
+    y: baoBetween(BAO_GROUND - 12, BAO_GROUND - 2),
+    phase: baoBetween(0, 6),
+    speed: baoBetween(0.4, 1),
+  }))
+  bao.x = Math.min(bao.x, Math.max(0, columns - 16))
+  bao.goal = Math.min(bao.goal, Math.max(0, columns - 14))
+}
+
+const baoSay = (kind: keyof typeof BAO_SAYS) =>
+  say(baoPick(BAO_SAYS[kind]).replace('{n}', String(bao.flies.length)), 5000)
+
+const baoBurst = (x: number, y: number, count: number, spread = 1, colors: readonly number[] = BAO_CONFETTI) => {
+  for (let k = 0; k < count; k += 1) {
+    const angle = baoBetween(0, Math.PI * 2)
+    const speed = (baoBetween(40, 160) * spread) / 8
+    bao.parts.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 7.5,
+      life: baoBetween(0.9, 1.6),
+      color: baoPick(colors),
+      falls: true,
+    })
+  }
+  if (bao.parts.length > 260) bao.parts.splice(0, bao.parts.length - 260)
+}
+
+/** A sprout eaten: the count, the combo, confetti and hearts, fireworks every fifth. */
+const baoReward = () => {
+  const cx = bao.x + 7
+  const cy = BAO_GROUND - 9
+  bao.score += 1
+  bao.combo = bao.t - bao.ateAt < 20 ? bao.combo + 1 : 1
+  bao.ateAt = bao.t
+  bao.hop = 0.55
+  bao.flash = 0.18
+  bao.pop = 0.5
+  baoBurst(cx, cy, 26 + bao.combo * 6)
+  for (let k = 0; k < 3; k += 1) {
+    bao.parts.push({ x: cx + baoBetween(-5, 5), y: cy - baoBetween(0, 2.5), vx: baoBetween(-1, 1), vy: baoBetween(-5, -3), life: 2, color: 0xfcd1ff, isHeart: true })
+  }
+  bao.parts.push({ x: cx - 1, y: BAO_GROUND - 15, vx: 0, vy: -2.7, life: 1.6, color: 0xffbf49, text: bao.combo > 1 ? `combo x${bao.combo}` : '+1' })
+  if (bao.score % 5 === 0) {
+    bao.flash = 0.35
+    bao.level = { n: bao.score / 5, at: bao.t }
+    for (let k = 0; k < 4; k += 1) {
+      const fx = baoBetween(0.15, 0.85) * bao.columns
+      const fy = baoBetween(3, 12)
+      bao.later.push({ at: bao.t + k * 0.22, run: () => baoBurst(fx, fy, 40, 1.3) })
+    }
+  }
+}
+
+/** Plants a sprout, at `x` or anywhere, and sends Bao for it unless it is eating. */
+const baoPlant = (at?: number) => {
+  const columns = bao.columns || 80
+  const x = Math.max(1, Math.min(columns - 2, Math.floor(at ?? baoBetween(2, columns - 2))))
+  const sprout: BaoSprout = { x, grown: 0 }
+  bao.sprouts.push(sprout)
+  for (let k = 0; k < 10; k += 1) {
+    bao.parts.push({ x: x + 0.5, y: BAO_GROUND, vx: baoBetween(-6, 6), vy: baoBetween(-14, -5), life: 0.8, color: baoPick([0x3fcc8c, 0xffbf49]), falls: true })
+  }
+  bao.parts.push({ x: x + 0.5, y: BAO_GROUND - 0.5, vx: 0, vy: 0, life: 0.5, color: 0x3fcc8c, isRing: true })
+  if (bao.state !== 'eat') {
+    bao.goal = Math.max(0, Math.min(columns - 14, x - 13))
+    bao.state = Math.abs(bao.goal - bao.x) > 14 ? 'roll' : 'walk'
+    bao.target = sprout
+    baoSay(bao.state)
+  }
+}
+
+/** Moves Bao's world on by `ms`. At rest it sleeps; while you type it stands and looks. */
+const stepBao = (ms: number, isWorking: boolean) => {
+  const dt = Math.min(0.1, ms / 1000)
+  const columns = bao.columns
+  bao.t += dt
+  if (actor.typing > 0) actor.typing -= ms
+  bao.hop = Math.max(0, bao.hop - dt)
+  bao.flash = Math.max(0, bao.flash - dt)
+  bao.pop = Math.max(0, bao.pop - dt)
+  if (bao.combo > 0 && bao.t - bao.ateAt > 20) bao.combo = 0
+  bao.blink -= dt
+  if (bao.blink < -3.5 - Math.random() * 3) bao.blink = 0.15
+  for (const one of bao.sprouts) one.grown = Math.min(1, one.grown + dt * 0.5)
+  const due = bao.later.filter(one => one.at <= bao.t)
+  bao.later = bao.later.filter(one => one.at > bao.t)
+  for (const one of due) one.run()
+
+  const isHeld = actor.typing > 0 || actor.isAwaited
+  const isResting = !isWorking && !isHeld
+  // The session's say over Bao's own: asleep at rest, still while you type, hopping while it waits on you.
+  if (isResting && bao.state !== 'sleep' && bao.state !== 'eat' && bao.state !== 'roll') {
+    bao.state = 'sleep'
+    bao.timer = 1e9
+    baoSay('sleep')
+  }
+  if (!isResting && bao.state === 'sleep' && bao.timer > 1e6) bao.timer = 0
+  if (isHeld && (bao.state === 'walk' || bao.state === 'idle')) {
+    bao.state = 'idle'
+    bao.timer = 0.4
+  }
+  if (isWorking && Math.random() < dt / 18 && bao.sprouts.length < 3) bao.sprouts.push({ x: Math.floor(baoBetween(2, columns - 2)), grown: 0 })
+  if (bao.state === 'idle' && Math.random() < dt * (actor.isAwaited ? 3 : 1.4) && bao.hop === 0) bao.hop = 0.55
+
+  if (bao.state === 'walk' || bao.state === 'roll') {
+    const isRolling = bao.state === 'roll'
+    bao.leg += dt * 2.2
+    const gap = bao.goal - bao.x
+    const step = dt * (isRolling ? 16 : 7)
+    if (isRolling) {
+      bao.angle += (Math.sign(gap) * step) / 6.5
+      if (Math.random() < dt * 14) {
+        bao.parts.push({ x: bao.x + 7 - Math.sign(gap) * 6, y: BAO_GROUND - 0.5, vx: -Math.sign(gap) * baoBetween(2.5, 7.5), vy: baoBetween(-5, -1.2), life: 0.6, color: baoPick([0x7c808c, 0x5b5b61]), falls: true })
+      }
+    }
+    if (isRolling && Math.abs(gap) <= step) {
+      bao.hop = 0.55
+      baoSay('land')
+      for (let k = 0; k < 12; k += 1) {
+        bao.parts.push({ x: bao.x + 7, y: BAO_GROUND - 0.5, vx: baoBetween(-11, 11), vy: baoBetween(-11, -4), life: 0.7, color: baoPick([0x7c808c, 0xffbf49]), falls: true })
+      }
+    }
+    if (Math.abs(gap) <= step) {
+      bao.x = bao.goal
+      if (bao.target !== null && bao.sprouts.includes(bao.target)) {
+        bao.sprouts.splice(bao.sprouts.indexOf(bao.target), 1)
+        bao.target = null
+        bao.state = 'eat'
+        bao.timer = 6
+        bao.chew = 0
+        baoSay('eat')
+      } else {
+        bao.state = 'idle'
+        bao.timer = baoBetween(1, 2.2)
+        if (Math.random() < 0.3) baoSay('idle')
+      }
+    } else {
+      bao.x += Math.sign(gap) * step
+      bao.heading = Math.sign(gap)
+    }
+    if (Math.random() < dt * 3) {
+      bao.parts.push({ x: bao.x + 7 + baoBetween(-4, 4), y: BAO_GROUND - 0.5, vx: 0, vy: -1, life: 1, color: 0x7c808c, text: baoPick([':', '.', '.']) })
+    }
+  } else {
+    bao.timer -= dt
+    if (bao.state === 'eat') {
+      bao.chew += dt
+      if (Math.random() < dt * 4) {
+        bao.parts.push({ x: bao.x + 7, y: BAO_GROUND - 4, vx: baoBetween(-5, 5), vy: baoBetween(-6, -1.2), life: 0.8, color: baoPick([0x3fcc8c, 0x2e9a68]), falls: true })
+      }
+      if (bao.timer <= 0) baoReward()
+    }
+    if (bao.state === 'sleep' && Math.random() < dt * 1.2) {
+      bao.parts.push({ x: bao.x + 12, y: BAO_GROUND - 12, vx: 1.2, vy: -2.2, life: 2.2, color: 0x9a9aa0, text: baoPick(['z', 'Z']) })
+    }
+    if (bao.timer <= 0) {
+      const ripe = bao.sprouts.find(one => one.grown >= 1)
+      const dice = Math.random()
+      if (ripe !== undefined && dice < 0.6 && !isHeld) {
+        bao.target = ripe
+        bao.goal = Math.max(0, Math.min(columns - 14, ripe.x - 13))
+        bao.state = Math.abs(bao.goal - bao.x) > 18 ? 'roll' : 'walk'
+        baoSay(bao.state)
+      } else if (isHeld) {
+        bao.state = 'idle'
+        bao.timer = 0.4
+      } else {
+        bao.target = null
+        bao.goal = Math.floor(baoBetween(0, Math.max(1, columns - 14)))
+        bao.state = dice > 0.5 && Math.abs(bao.goal - bao.x) > 12 ? 'roll' : 'walk'
+        if (Math.random() < 0.5) baoSay(bao.state)
+      }
+    }
+  }
+  // A leaf lets go of a stalk now and then, and drifts down.
+  if (Math.random() < dt * 1.5 && bao.stalks.length > 0) {
+    const from = baoPick(bao.stalks)
+    bao.parts.push({ x: from.x, y: BAO_GROUND - from.h, vx: baoBetween(0.6, 2.5), vy: 1.5, life: 6, color: 0x3fcc8c, leaf: baoBetween(0, 6) })
+  }
+  for (const one of bao.parts) {
+    one.life -= dt
+    one.x += one.vx * dt + (one.leaf === undefined ? 0 : Math.sin(bao.t * 2 + one.leaf) * 1.5 * dt)
+    one.y += one.vy * dt
+    if (one.falls) one.vy += 17.5 * dt
+    if (one.leaf !== undefined && one.y > BAO_GROUND) one.life = 0
+  }
+  bao.parts = bao.parts.filter(one => one.life > 0)
+}
+
+/** Two colors mixed: `share` of the first over the second. */
+const baoMix = (over: number, under: number, share: number) => {
+  if (share >= 1) return over
+  const blend = (shift: number) => Math.round(((under >> shift) & 255) + (((over >> shift) & 255) - ((under >> shift) & 255)) * Math.max(0, share))
+
+  return (blend(16) << 16) | (blend(8) << 8) | blend(0)
+}
+
+/** Bao's world as Raster cells, `columns` wide and BAO_ROWS tall. */
+const baoStrip = (columns: number) => {
+  if (bao.columns !== columns) baoLay(columns)
+  const night = BAO_NIGHT
+  const floor = BAO_GROUND
+  const pixels = new Int32Array(columns * BAO_TALL).fill(night.sky)
+  const cell = (x: number, y: number, color: number, wide = 1, tall = 1, share = 1) => {
+    for (let dy = 0; dy < tall; dy += 1) {
+      for (let dx = 0; dx < wide; dx += 1) {
+        const px = Math.floor(x) + dx
+        const py = Math.floor(y) + dy
+        if (px < 0 || px >= columns || py < 0 || py >= BAO_TALL) continue
+        const at = py * columns + px
+        pixels[at] = baoMix(color, pixels[at] ?? night.sky, share)
+      }
+    }
+  }
+  /** What is written in characters, a cell each: laid over the picture last. */
+  const written: { x: number; row: number; glyph: number; color: number; share: number; behind?: number }[] = []
+  const write = (x: number, row: number, text: string, color: number, share = 1, behind?: number) => {
+    for (let k = 0; k < text.length; k += 1) {
+      if (text[k] !== ' ' || behind !== undefined) written.push({ x: Math.floor(x) + k, row, glyph: glyphOf(text[k] ?? ' '), color, share, behind })
+    }
+  }
+
+  for (const one of bao.stars) {
+    write(one.x, Math.floor(one.y / 2), one.glyph, one.glyph === '*' ? 0xffbf49 : 0x7c808c, 0.35 + 0.65 * Math.max(0, Math.sin(bao.t * 1.3 + one.phase)))
+  }
+  const stalk = (one: BaoStalk) => {
+    const top = floor - one.h
+    const sway = Math.round(Math.sin(bao.t * 1.2 + one.phase) * 0.9)
+    const leaf = one.isBack ? night.stalkBack : 0x3fcc8c
+    for (let y = top; y < floor; y += 1) {
+      const isNode = (y - top) % 5 === 4
+      cell(one.x, y, one.isBack ? (isNode ? night.nodeBack : night.stalkBack) : isNode ? 0x1e6b47 : 0x2e9a68)
+      if (isNode && y < floor - 3) {
+        const side = y % 2 === 1 ? 1 : -1
+        cell(one.x + side, y, leaf)
+        cell(one.x + side * 2 + (side > 0 ? sway : 0), y - 1, leaf)
+        cell(one.x + side * 3 + sway, y - 1, leaf)
+      }
+    }
+    cell(one.x - 1 + sway, top - 1, leaf)
+    cell(one.x + sway, top - 2, leaf)
+    cell(one.x + 1 + sway, top - 1, leaf)
+    cell(one.x + 2 + sway, top - 2, leaf)
+  }
+  for (let x = 0; x < columns; x += 1) {
+    const high = bao.hillBack[x] ?? 0
+    if (high > 0) cell(x, floor - high - 3, night.hillBack, 1, high + 3)
+  }
+  for (const one of bao.stalksBack) stalk(one)
+  for (let x = 0; x < columns; x += 1) {
+    const high = bao.hillFront[x] ?? 0
+    if (high > 0) cell(x, floor - high, night.hillFront, 1, high)
+  }
+  for (const one of bao.stalks) stalk(one)
+  for (const one of bao.sprouts) {
+    const high = 1 + Math.floor(one.grown * 3)
+    for (let up = 1; up <= high; up += 1) cell(one.x, floor - up, 0x2e9a68)
+    if (one.grown >= 1) {
+      cell(one.x + 1, floor - 3, 0x3fcc8c)
+      cell(one.x - 1, floor - 4, 0x3fcc8c)
+    }
+  }
+
+  // Bao: a ball when it rolls, else its head, body and legs row by row, ringed.
+  const left = Math.round(bao.x)
+  if (bao.state === 'roll') {
+    const cx = bao.x + 7
+    const cy = floor - 7
+    const cos = Math.cos(bao.angle)
+    const sin = Math.sin(bao.angle)
+    for (let y = -8; y <= 8; y += 1) {
+      for (let x = -8; x <= 8; x += 1) {
+        const dx = x + 0.5 - (cx - Math.floor(cx))
+        const dy = y + 0.5
+        const reach = Math.hypot(dx, dy)
+        if (reach > 7.2) continue
+        const u = dx * cos + dy * sin
+        const v = -dx * sin + dy * cos
+        const color =
+          reach > 6.2 || Math.abs(v) < 1.4 || Math.hypot(u - 2.8, v + 3.6) < 1.5 || Math.hypot(u + 2.8, v + 3.6) < 1.5
+            ? BAO_INK.K
+            : v > 3.4
+              ? BAO_INK.G
+              : BAO_INK.W
+        cell(Math.floor(cx) + x, cy + y, color ?? 0)
+      }
+    }
+  } else {
+    const top = floor - 16 - Math.round(Math.sin(Math.min(1, bao.hop / 0.55) * Math.PI) * 5)
+    const eyes =
+      bao.state === 'sleep' || bao.blink > 0 ? BAO_EYES.x : bao.state === 'walk' ? (bao.heading > 0 ? BAO_EYES.r : BAO_EYES.l) : BAO_EYES.c
+    const mouth = bao.state === 'eat' && Math.floor(bao.chew * 5) % 2 === 1 ? '.WWWWGKKGWWWW.' : '.WWWWGWWGWWWW.'
+    const legs =
+      bao.state === 'walk'
+        ? ([BAO_LEGS.a, BAO_LEGS.b, BAO_LEGS.a, BAO_LEGS.c][((Math.floor(bao.leg * 6) % 4) + 4) % 4] ?? BAO_LEGS.a)
+        : bao.state === 'idle'
+          ? BAO_LEGS.a
+          : BAO_LEGS.sit
+    const rows: string[] = [...BAO_HEAD.map(row => (row === 'EYES' ? eyes : row === 'MOUTH' ? mouth : row)), ...BAO_BODY, ...legs]
+    const isOn = (x: number, y: number) => {
+      const seen = rows[y]?.[x]
+
+      return seen !== undefined && seen !== '.'
+    }
+    for (let y = -1; y < rows.length; y += 1) {
+      for (let x = -1; x <= 14; x += 1) {
+        if (!isOn(x, y) && (isOn(x - 1, y) || isOn(x + 1, y) || isOn(x, y - 1) || isOn(x, y + 1))) cell(left + x, top + y, night.rim)
+      }
+    }
+    rows.forEach((row, y) => {
+      for (let x = 0; x < row.length; x += 1) {
+        const seen = row[x] ?? '.'
+        if (seen !== '.') cell(left + x, top + y, BAO_INK[seen] ?? 0)
+      }
+    })
+    if (bao.state === 'eat') {
+      for (let y = 3; y <= 14; y += 1) cell(left + 12, top + y, y % 4 === 0 ? 0x1e6b47 : 0x2e9a68)
+      const sway = Math.round(Math.sin(bao.t * 3))
+      cell(left + 13 + sway, top + 2, 0x3fcc8c)
+      cell(left + 14 + sway, top + 1, 0x3fcc8c)
+      cell(left + 11, top + 2, 0x3fcc8c)
+      cell(left + 11, top + 10, BAO_INK.K ?? 0, 1, 2)
+      cell(left + 13, top + 10, BAO_INK.K ?? 0, 1, 2)
+    }
+    write(left + 5, Math.max(0, Math.floor((top - 2) / 2)), 'bao', 0xffbf49)
+  }
+
+  // The ground with its bright blades, the soil under it, and the water at the foot.
+  for (let x = 0; x < columns; x += 1) {
+    cell(x, floor, x % 7 === 3 || x % 11 === 5 ? 0x3fcc8c : 0x2e7a55)
+    if ((bao.soil[x] ?? 0) > 0.82) cell(x, floor - 1, 0x2e7a55)
+    for (let down = 1; down <= 4; down += 1) {
+      cell(x, floor + down, (bao.soil[x * 5 + down] ?? 0) > 0.85 ? 0x4a3a31 : down > 2 ? 0x2f2420 : 0x3a2c26)
+    }
+  }
+  cell(0, floor + 5, 0x14284a, columns, 2)
+  const drift = Math.floor(bao.t * 8) % 4
+  for (let x = 0; x < columns; x += 1) {
+    if ((x + drift) % 4 !== 0) write(x, (floor + 5) / 2, '~', 0x7996ff, (x + drift) % 4 === 2 ? 1 : 0.55)
+  }
+
+  for (const one of bao.flies) {
+    if (Math.sin(bao.t * 2 * one.speed + one.phase) > 0.2) {
+      cell(one.x + Math.sin(bao.t * 0.5 * one.speed + one.phase) * 5, one.y + Math.sin(bao.t * 0.9 + one.phase) * 1.25, 0xffbf49)
+    }
+  }
+  for (const one of bao.parts) {
+    const share = Math.min(1, one.life * 2)
+    if (one.isHeart) {
+      BAO_HEART.forEach((row, y) => {
+        for (let x = 0; x < row.length; x += 1) if (row[x] === 'X') cell(one.x + x - 2, one.y + y, one.color, 1, 1, share)
+      })
+    } else if (one.isRing) {
+      const reach = Math.round((0.5 - one.life) * 10) + 1
+      for (let x = -reach; x <= reach; x += 1) {
+        cell(one.x + x, one.y - reach / 2, one.color, 1, 1, share)
+        cell(one.x + x, one.y + reach / 2, one.color, 1, 1, share)
+      }
+    } else if (one.text !== undefined) {
+      write(one.x, Math.floor(one.y / 2), one.text, one.color, share)
+    } else {
+      cell(one.x, one.y, one.color, 1, 1, share)
+    }
+  }
+
+  // The count of bamboos eaten, its combo and how long the combo has left.
+  const tally = `bambous ${String(bao.score).padStart(2, '0')}`
+  write(2, 0, tally, bao.pop > 0 ? 0x8ff0c4 : 0x3fcc8c)
+  if (bao.combo > 1) write(2 + tally.length, 0, ` x${bao.combo}`, 0xffbf49)
+  if (bao.combo > 0) {
+    const left12 = Math.round(12 * Math.max(0, 1 - (bao.t - bao.ateAt) / 20))
+    cell(2, 2, 0x3d4452, 12, 1)
+    if (left12 > 0) cell(2, 2, 0xffbf49, left12, 1)
+  }
+  if (bao.level !== null && bao.t - bao.level.at < 2.4) {
+    const age = bao.t - bao.level.at
+    const title = `niveau ${bao.level.n}`
+    write(Math.round((columns - title.length) / 2), 5 - Math.round(age * 0.4), title, Math.floor(age * 8) % 2 === 1 ? 0xfcd1ff : 0xffbf49, Math.min(1, (2.4 - age) * 2))
+  }
+
+  // What Bao says, typed out a letter at a time, in a black frame beside it.
+  if (scene.lines.length > 0) {
+    let typed = Math.max(0, Math.floor(((scene.clock - scene.saidAt) / 1000) * 32))
+    const framed = Math.max(...scene.lines.map(one => one.length)) + 4
+    let from = left + 15
+    if (from + framed > columns - 1) from = left - framed - 1
+    from = Math.max(1, from)
+    const last = scene.lines.length + 1
+    for (let row = 0; row <= last; row += 1) {
+      cell(from, (row + 1) * 2, 0x0b0b0c, framed, 2)
+      for (let x = 0; x < framed; x += 1) {
+        const isEdgeRow = row === 0 || row === last
+        const isEdgeCol = x === 0 || x === framed - 1
+        const corner = row === 0 ? (x === 0 ? '╭' : '╮') : x === 0 ? '╰' : '╯'
+        if (isEdgeRow || isEdgeCol) write(from + x, row + 1, isEdgeRow && isEdgeCol ? corner : isEdgeRow ? '─' : '│', 0xc9c9cf, 1, 0x0b0b0c)
+      }
+      if (row > 0 && row < last) {
+        const text = scene.lines[row - 1] ?? ''
+        write(from + 2, row + 1, text.slice(0, typed), 0xf2f2f2, 1, 0x0b0b0c)
+        typed = Math.max(0, typed - text.length)
+      }
+    }
+  }
+
+  // A reward flashes the whole scene white for an instant.
+  const glare = bao.flash > 0 ? bao.flash * 0.5 : 0
+  const total = columns * BAO_ROWS
+  const words = new Uint32Array(total * 3)
+  for (let row = 0; row < BAO_ROWS; row += 1) {
+    for (let x = 0; x < columns; x += 1) {
+      const top = baoMix(0xffffff, pixels[row * 2 * columns + x] ?? night.sky, glare)
+      const bottom = baoMix(0xffffff, pixels[(row * 2 + 1) * columns + x] ?? night.sky, glare)
+      const at = (row * columns + x) * 3
+      words[at] = top === bottom ? 0x20 : LOWER_HALF
+      words[at + 1] = bottom
+      words[at + 2] = top
+    }
+  }
+  for (const one of written) {
+    if (one.row < 0 || one.row >= BAO_ROWS || one.x < 0 || one.x >= columns) continue
+    const at = (Math.floor(one.row) * columns + one.x) * 3
+    const under = one.behind ?? words[at + 2] ?? night.sky
+    words[at] = one.glyph
+    words[at + 1] = baoMix(one.color, under, one.share)
+    words[at + 2] = under
   }
 
   return toBase64(new Uint8Array(words.buffer))
@@ -2486,7 +3066,7 @@ const skinOf = (value: unknown): Skin => {
  */
 const COMMAND = {
   description: 'Rouvre et cadre le pane Unlocker',
-  argumentHint: 'auto | mission <texte> | spec <feature|off> | cat <roux|noir|garfield|panda> | lasagne [off] | pet <sprite|big|png|3d|line|pixel|off> | demo | UNL-1234 <texte>',
+  argumentHint: 'auto | mission <texte> | spec <feature|off> | cat <roux|noir|garfield|panda> | lasagne [off] | bambou | pet <sprite|big|png|3d|line|pixel|off> | demo | UNL-1234 <texte>',
 }
 
 const claimCommand = async ($: EngineInterface, isFreshLoad = false) => {
@@ -3065,7 +3645,20 @@ export const register: Register = on => {
       }
     }
 
+    if (/^bamb(ou|oo)s?$/i.test(args)) {
+      if (!stage.isBao) return { text: 'Focus pane: le bambou est pour le panda (cat panda, dans un terminal).' }
+      baoPlant()
+
+      return { text: 'Focus pane: une pousse de bambou est plantée.' }
+    }
+
     if (/^lasagn[ea]s?(\s|$)/i.test(args)) {
+      if (stage.isBao) {
+        // A panda's feast is bamboo: a row of sprouts to roll between.
+        for (let k = 0; k < 5; k += 1) baoPlant()
+
+        return { text: 'Focus pane: festin de bambou, cinq pousses plantées.' }
+      }
       if (stage.style !== 'sprite' && stage.style !== 'big') {
         return { text: 'Focus pane: les lasagnes sont pour le chat en sprites (pet sprite ou pet big).' }
       }
@@ -3453,7 +4046,9 @@ export const register: Register = on => {
     const [kind, verb, rest] = e.element.split(':')
     const id = Number(rest ?? verb)
 
-    if (kind === 'focus') {
+    if (kind === 'bao' && verb === 'plant') {
+      baoPlant()
+    } else if (kind === 'focus') {
       // a, t, c: the hotkey puts the caret in its field, the person types.
       const { serial } = await read($, board)
       const field = verb === 'chore' ? 'chore:new' : verb === 'link' ? 'chore:link' : 'note:new'
@@ -3658,6 +4253,7 @@ export const register: Register = on => {
     // Every surface's table names every element; only the terminal draws cells.
     const Raster = e.surface === 'terminal' && 'Raster' in table ? table.Raster : undefined
     const asked: PetStyle = await read($, petStyle)
+    const coat: PetCoat = await read($, petCoat)
     const canPixel = Raster !== undefined && tone.panel !== undefined && tone.text !== undefined
     const Image = e.surface === 'terminal' && 'Image' in table ? table.Image : undefined
     // Where there is no grid of cells to paint but real pictures: the desktop.
@@ -3666,8 +4262,10 @@ export const register: Register = on => {
     const fitted: PetStyle = isSvg ? 'off' : asked !== 'off' && asked !== 'line' && !canPixel ? 'line' : asked
     // No Image on this surface, or a terminal that refused it: the sprite cat.
     const style: PetStyle = fitted === 'png' && (Image === undefined || imageRefusal !== '') ? 'sprite' : fitted
+    // The panda, on a terminal, has a world of its own in place of the meadow, and a key to plant in it.
+    const isBao = coat === 'panda' && (style === 'sprite' || style === 'big') && canPixel
     const petRows =
-      style === 'png' ? PNG_ROWS : style === 'sprite' || style === 'big' ? stripRows() : style === '3d' ? CAT3_ROWS : style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
+      isBao ? BAO_ROWS + 1 : style === 'png' ? PNG_ROWS : style === 'sprite' || style === 'big' ? stripRows() : style === '3d' ? CAT3_ROWS : style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
     const mood = pet.isAsleep
       ? 'z'
       : pet.moodTicks > 0
@@ -3681,7 +4279,8 @@ export const register: Register = on => {
     stage.ink = tone.text ?? ''
     stage.mood = mood
     stage.style = style
-    stage.coat = await read($, petCoat)
+    stage.coat = coat
+    stage.isBao = isBao
     // What the meadow shows of the session: a bloom a finished todo, a mushroom a failed call.
     scene.done = done
     scene.fails = rows.filter(one => one.isError).length
@@ -4053,6 +4652,7 @@ export const register: Register = on => {
       ['t', 'Lien'],
       ['c', 'Commenter'],
       ...(design ? ([['m', 'Miniatures'], ['o', 'Maquette']] as const) : []),
+      ...(isBao ? ([['b', 'Bambou']] as const) : []),
       ['ctrl+x tab', 'Clavier'],
       ['esc', 'Rendre la main'],
       ...(mine === null ? [] : ([[`/${mine}`, 'Rouvrir']] as const)),
@@ -4094,7 +4694,13 @@ export const register: Register = on => {
             />
           </Box>
         )}
-        {(style === 'sprite' || style === 'big') && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
+        {isBao && (
+          <Box flexDirection="row" width="100%" justifyContent="flex-end">
+            <Button key="bao:plant" plain hotkey="b" label="planter un bambou" dimColor onPress={() => undefined} />
+          </Box>
+        )}
+        {isBao && Raster !== undefined && <Raster key="pet" columns={room} rows={BAO_ROWS} cells={baoStrip(room)} />}
+        {!isBao && (style === 'sprite' || style === 'big') && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
           <Raster
             key="pet"
             columns={room}
