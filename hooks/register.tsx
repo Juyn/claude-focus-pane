@@ -1460,8 +1460,6 @@ const stripRows = () => catRows() + GROUND_ROWS
 /** What the scene is painted with, beside the sheets' own palettes. */
 const SCENE = {
   hurt: [0xff6b7a, 0xc8283a],
-  board: 0x7a4524,
-  letters: 0xf6d9a8,
 }
 
 /** One thing adrift over the scene, a character a cell: the crosses of a failed call. */
@@ -1497,8 +1495,6 @@ const scene = {
   fails: 0,
   blooms: [] as Growth[],
   mushrooms: [] as Growth[],
-  /** The ticket on the signpost, when the session has one. */
-  ticket: '',
   isDirty: false,
 }
 
@@ -1567,8 +1563,7 @@ const layMeadow = (columns: number) => {
     back.push({ item: pick(['rock_a', 'rock_b'] as const), x })
   }
   // Grass in front, in tufts of every kind, and between the tufts the plots.
-  // Past the signpost's corner, so what grows is never behind its board.
-  for (let x = 34 + Math.floor(next() * 6); x < columns - 10; x += 9 + Math.floor(next() * 10)) {
+  for (let x = 2 + Math.floor(next() * 8); x < columns - 10; x += 9 + Math.floor(next() * 10)) {
     if (next() < 0.38) plots.push(x)
     else front.push({ item: pick(GRASS), x })
   }
@@ -1781,10 +1776,8 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
     }
   }
 
-  // Behind the cat: the tree, the bush, the rocks, the signpost, what grew, the dish.
+  // Behind the cat: the tree, the bush, the rocks, what grew, the dish.
   for (const one of scene.back) stand(one.item, 0, one.x)
-  const signLeft = 2
-  if (scene.ticket) stand('signpost', 0, signLeft)
   // A bloom a finished todo, a mushroom a failed call, each in its plot.
   while (scene.blooms.length < Math.min(scene.done, scene.plots.length)) {
     scene.blooms.push({ x: scene.plots[scene.blooms.length] ?? 0, kind: scene.blooms.length % BLOOMS.length, born: scene.clock })
@@ -1888,15 +1881,6 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
   for (const one of scene.specks) {
     const shade = one.colors[Math.min(one.colors.length - 1, Math.floor((one.age / one.life) * one.colors.length))]
     put(Math.round(one.y), Math.round(one.x), one.glyph, shade ?? pen, base, false)
-  }
-
-  // The ticket on the signpost's board, in characters over its planks.
-  if (scene.ticket) {
-    const board = 28 * scale
-    const text = scene.ticket.slice(0, board - 2)
-    const row = Math.floor((floor - cell + 6) / 2)
-    const from = signLeft + 2 * scale + Math.floor((board - text.length) / 2)
-    for (let k = 0; k < text.length; k += 1) put(row, from + k, glyphOf(text[k] ?? ' '), SCENE.letters, SCENE.board)
   }
 
   // What it says, in a frame beside its head: on the side with room.
@@ -3411,7 +3395,6 @@ export const register: Register = on => {
     // What the meadow shows of the session: a bloom a finished todo, a mushroom a failed call.
     scene.done = done
     scene.fails = rows.filter(one => one.isError).length
-    scene.ticket = seated.ticket ?? ''
     stage.left = pngLeft(room)
     stage.root = $.plugin.root
     stage.isSvg = isSvg
