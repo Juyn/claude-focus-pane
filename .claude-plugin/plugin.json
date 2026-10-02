@@ -1,0 +1,10 @@
+{
+  "name": "focus-pane",
+  "version": "0.1.0",
+  "description": "A permanent pane: the ticket and summary of what Claude works on, its progress, and its todo list",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Xavier",
+    "email": "xavier@unlocker.io"
+  }
+}

@@ -1,0 +1,47 @@
+#!/usr/bin/env sh
+# Registers this folder as a Claude Code mod for every session of this user:
+# adds it to CLAUDE_CODE_PLUGIN_DIRS in the env block of ~/.claude/settings.json.
+# Idempotent; the previous settings.json is kept beside it as a dated backup.
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+
+command -v python3 >/dev/null || { echo "install.sh: python3 is required" >&2; exit 1; }
+mkdir -p "$(dirname "$settings")"
+[ -f "$settings" ] || echo '{}' > "$settings"
+
+python3 - "$settings" "$here" <<'PY'
+import json, os, shutil, sys, time
+
+path, here = sys.argv[1], sys.argv[2]
+with open(path, encoding='utf-8') as held:
+    settings = json.load(held)
+
+env = settings.setdefault('env', {})
+dirs = [one for one in env.get('CLAUDE_CODE_PLUGIN_DIRS', '').split(os.pathsep) if one]
+known = {os.path.realpath(os.path.expanduser(one)) for one in dirs}
+if os.path.realpath(here) in known and env.get('CLAUDE_CODE_PLUGIN_DIR_WATCH') == '1':
+    print(f'already installed: {here}')
+    sys.exit(0)
+
+shutil.copy2(path, f'{path}.bak-{time.strftime("%Y%m%d-%H%M%S")}')
+if os.path.realpath(here) not in known:
+    dirs.append(here)
+env['CLAUDE_CODE_PLUGIN_DIRS'] = os.pathsep.join(dirs)
+env['CLAUDE_CODE_PLUGIN_DIR_WATCH'] = '1'
+with open(path, 'w', encoding='utf-8') as held:
+    json.dump(settings, held, indent=2, ensure_ascii=False)
+    held.write('\n')
+print(f'installed: {here} -> {path}')
+PY
+
+for tool in magick xdg-open; do
+  command -v "$tool" >/dev/null || echo "note: '$tool' not found (see README, optional features)"
+done
+found=""
+for browser in brave chromium google-chrome-stable google-chrome chrome; do
+  command -v "$browser" >/dev/null && found=$browser && break
+done
+[ -n "$found" ] || echo "note: no Chromium browser found (mockup thumbnails will be unavailable)"
+echo "Start a NEW Claude Code session: plugin folders are read at process start."
