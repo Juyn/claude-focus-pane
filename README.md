@@ -96,6 +96,7 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission mission <text>` | sets the mission by hand |
 | `/mission <text>` / `auto` | pins the action line / hands it back to the model |
 | (the scene) | the sprite cat lives in a small meadow: grass, blooms, a bug ambling by, dust raised by each tool call, sparks on a finished todo, and a speech bubble — canned lines for events, and one quip a turn start and a turn end, worded by haiku |
+| `/mission pet fine` | the same cat from the 64×36 sheet, in quadrants: twice the detail across, two colors a cell; whether it looks cleaner than `sprite` depends on how the terminal draws quadrants |
 | `/mission pet png` | the cat as a real image (64×36 frames from `assets/frames/`, 9 rows), where the terminal draws pictures (kitty graphics protocol); elsewhere it says so and falls back to `sprite`. `python3 scripts/build-frames.py` cuts the frames |
 | `/mission pet sprite` / `3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: the sprite sheet (12 rows, default), ray-marched 3D (10 rows), line art (9 rows), flat pixels (3 rows), or sent in |
 | `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity, notes — to see it full; the notes are shown, never stored |
@@ -120,10 +121,8 @@ The sprite cat is `assets/cat-sheet.png` (32×24 frames, described by `assets/ca
 into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet. A 64×36 sheet
 is squeezed to 64×24 at bake time and drawn in quadrants, four pixels and two colors a cell: twice
 the detail across at the same size on screen. Sextants would keep all 36 rows, but a Raster cell
-refuses any character beyond the Basic Multilingual Plane. The finer sheet is kept under
-`assets/v2-64x36/` (`python3 scripts/build-sprites.py assets/v2-64x36/cat-sheet.json` bakes it), but it is
-not the default: terminals draw quadrants with visible seams between cells, and the cat looks worse
-for it than in plain half blocks.
+refuses any character beyond the Basic Multilingual Plane. Both sheets are baked: `pet sprite` draws the 32×24 one,
+`pet fine` the 64×36 one.
 
 `hooks/register.tsx` is the module, `types/index.d.ts` its state contract, `scripts/thumbs.py` the
 thumbnail shooter (cached in `~/.cache/focus-pane`). With `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` an edit

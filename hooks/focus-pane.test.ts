@@ -650,3 +650,12 @@ test('the scene around the cat draws its specks and what it says without a refus
   expect(strip?.type).toBe('Raster')
   expect(strip?.props.rows).toBe(13)
 })
+
+test('pet fine draws the fine sheet in quadrants the engine takes', async ($, on) => {
+  await start($, on)
+  await petCommand($, 'fine')
+  const strip = await (await mounted($, 100)).find({ key: 'pet' })
+
+  expect(strip?.type).toBe('Raster')
+  expect(strip?.props.rows).toBe(13)
+})
