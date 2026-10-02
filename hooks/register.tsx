@@ -1136,6 +1136,29 @@ const TURN_OUT = [...TURN_IN].reverse()
 const direct = (isWorking: boolean, span: number): Beat => {
   const queued = actor.queue.shift()
   if (queued !== undefined) return queued
+
+  // Lasagne on the table: no sitting, no watching, it tears from end to end
+  // and leaps as it goes, until the dish is done.
+  if (isFeasting()) {
+    actor.react = ''
+    if (actor.posture !== 'standing') {
+      actor.posture = 'standing'
+      actor.goal = actor.heading > 0 ? span : 0
+
+      return { clip: 'turn', frames: TURN_OUT, isFlipped: actor.heading < 0, stride: 0 }
+    }
+    if (actor.heading > 0 ? actor.x >= span : actor.x <= 0) actor.heading = actor.heading > 0 ? -1 : 1
+    actor.goal = actor.heading > 0 ? span : 0
+    const clip = Math.random() < 0.4 ? 'happy' : 'run'
+
+    return {
+      clip,
+      frames: count(CLIPS[clip].frames.length),
+      isFlipped: actor.heading < 0,
+      stride: 2 * actor.heading,
+    }
+  }
+
   const isFlipped = actor.heading < 0
   const isWatching = actor.typing > 0
   const sit: Beat = { clip: 'sit', frames: count(CLIPS.sit.frames.length), isFlipped: false, stride: 0 }
@@ -1278,6 +1301,8 @@ const scene = {
   lines: [] as string[],
   saysUntil: 0,
   bugX: 0,
+  /** Until when, on the scene's clock, the lasagne is out and the cat beside itself. */
+  feastUntil: 0,
   /** The props laid for a strip this wide, and that width. */
   props: [] as Prop[],
   laidFor: 0,
@@ -1285,6 +1310,38 @@ const scene = {
 }
 
 const glyphOf = (text: string) => text.codePointAt(0) ?? 0x20
+
+const isFeasting = () => scene.clock < scene.feastUntil
+
+/** How long a dish of lasagne lasts. */
+const FEAST_MS = 60_000
+
+/**
+ * The dish, 14 by 8 pixels, two a cell: `c` cheese, `b` its browned spots,
+ * `s` sauce, `p` pasta, `w` the plate, `.` nothing.
+ */
+const LASAGNE = [
+  '..cccbcccccc..',
+  '.cbccccccbccc.',
+  '.ssssssssssss.',
+  '.pppppppppppp.',
+  '.ssssssssssss.',
+  '.pppppppppppp.',
+  'wwwwwwwwwwwwww',
+  '.wwwwwwwwwwww.',
+] as const
+const DISH: Record<string, number> = { c: 0xf6d27a, b: 0xd9902f, s: 0xc8402a, p: 0xf0c45a, w: 0xe6eaf5 }
+const DISH_COLUMNS = 14
+const DISH_ROWS = LASAGNE.length / 2
+
+/** Serves the lasagne, or clears the table. */
+const feast = (isServed: boolean) => {
+  scene.feastUntil = isServed ? scene.clock + FEAST_MS : 0
+  actor.isCalled = true
+  pet.isAsleep = false
+  scene.isDirty = true
+  if (isServed) say(stage.coat === 'garfield' ? 'LASAGNES !!!' : 'Des lasagnes ?!', 4000)
+}
 
 /** A small repeatable generator: the same strip width grows the same meadow. */
 const seeded = (seed: number) => {
@@ -1353,7 +1410,7 @@ const burst = (count: number, glyph: string, colors: readonly number[], spread: 
       colors,
     })
   }
-  if (scene.specks.length > 60) scene.specks.splice(0, scene.specks.length - 60)
+  if (scene.specks.length > 90) scene.specks.splice(0, scene.specks.length - 90)
 }
 
 /** Only what a Raster cell takes for sure: Latin letters, digits, plain punctuation. */
@@ -1395,9 +1452,45 @@ const say = (text: string, ms = 7000) => {
 /** Moves the scene on by `ms`; true when what is drawn changed. */
 const stepScene = (ms: number) => {
   const before = Math.floor(scene.clock / 420)
+  const wasFeasting = isFeasting()
   scene.clock += ms
   let hasMoved = scene.isDirty
   scene.isDirty = false
+  if (wasFeasting && !isFeasting()) {
+    // The dish is done: back to what the agent's state asks of it.
+    actor.isCalled = true
+    say('Burp.', 3000)
+    hasMoved = true
+  }
+  if (isFeasting()) {
+    // Squares of dust streaming off its heels, and more adrift over the meadow.
+    const columns = stage.columns || 80
+    const head = headAt(columns)
+    const pick = (from: readonly number[]) => [from[Math.floor(Math.random() * from.length)] ?? 0]
+    scene.specks.push({
+      x: head.x - actor.heading * (catColumns() / 2 + Math.random() * 6),
+      y: catRows() - 1 - Math.random() * (catRows() / 2),
+      dx: -actor.heading * (0.5 + Math.random() * 0.7),
+      dy: -Math.random() * 0.06,
+      age: 0,
+      life: 350 + Math.random() * 450,
+      glyph: glyphOf('■'),
+      colors: SCENE.ember,
+    })
+    if (Math.random() < 0.35) {
+      scene.specks.push({
+        x: Math.random() * columns,
+        y: Math.random() * (catRows() - 2),
+        dx: (Math.random() - 0.5) * 0.3,
+        dy: (Math.random() - 0.5) * 0.1,
+        age: 0,
+        life: 500 + Math.random() * 900,
+        glyph: glyphOf('■'),
+        colors: pick(SCENE.ember),
+      })
+    }
+    hasMoved = true
+  }
   if (scene.specks.length > 0) {
     for (const one of scene.specks) {
       one.age += ms
@@ -1449,6 +1542,24 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
   for (const one of scene.specks) {
     const shade = one.colors[Math.min(one.colors.length - 1, Math.floor((one.age / one.life) * one.colors.length))]
     put(Math.round(one.y), Math.round(one.x), one.glyph, shade ?? pen)
+  }
+
+  // The lasagne, steaming, toward the right end: the cat runs past in front of it.
+  if (isFeasting()) {
+    const dishLeft = Math.max(1, columns - DISH_COLUMNS - 8)
+    const dishTop = catRows() - DISH_ROWS
+    for (let row = 0; row < DISH_ROWS; row += 1) {
+      for (let x = 0; x < DISH_COLUMNS; x += 1) {
+        const top = DISH[LASAGNE[row * 2]?.[x] ?? '.']
+        const bottom = DISH[LASAGNE[row * 2 + 1]?.[x] ?? '.']
+        if (top === undefined && bottom === undefined) continue
+        put(dishTop + row, dishLeft + x, LOWER_HALF, bottom ?? base, top ?? base)
+      }
+    }
+    const waft = Math.floor(scene.clock / 300)
+    for (let k = 0; k < 3; k += 1) {
+      put(dishTop - 1 - ((waft + k) % 2), dishLeft + 3 + k * 4, glyphOf(((waft + k) & 1) === 0 ? '~' : "'"), 0x8f98b8)
+    }
   }
 
   // The cat, over all that: only the cells it has a pixel in.
@@ -1795,7 +1906,7 @@ const skinOf = (value: unknown): Skin => {
  */
 const COMMAND = {
   description: 'Rouvre et cadre le pane Unlocker',
-  argumentHint: 'auto | mission <texte> | spec <feature|off> | cat <roux|noir|garfield> | pet <sprite|big|png|3d|line|pixel|off> | demo | UNL-1234 <texte>',
+  argumentHint: 'auto | mission <texte> | spec <feature|off> | cat <roux|noir|garfield> | lasagne [off] | pet <sprite|big|png|3d|line|pixel|off> | demo | UNL-1234 <texte>',
 }
 
 const claimCommand = async ($: EngineInterface, isFreshLoad = false) => {
@@ -2352,6 +2463,16 @@ export const register: Register = on => {
           ? `Focus pane lié à ${bound.path} (${bound.docs.map(one => one.kind).join(', ')}).`
           : `Aucune feature Sacred Book ne répond à « ${asked} ».`,
       }
+    }
+
+    if (/^lasagn[ea]s?(\s|$)/i.test(args)) {
+      if (stage.style !== 'sprite' && stage.style !== 'big') {
+        return { text: 'Focus pane: les lasagnes sont pour le chat en sprites (pet sprite ou pet big).' }
+      }
+      const isServed = !/\soff$/i.test(args)
+      feast(isServed)
+
+      return { text: isServed ? 'Focus pane: lasagnes servies, une minute de folie.' : 'Focus pane: table débarrassée.' }
     }
 
     if (args === 'cat' || args.startsWith('cat ')) {

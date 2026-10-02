@@ -672,3 +672,14 @@ test('cat picks which cat walks the pane, at either size', async ($, on) => {
   await petCommand($, 'big')
   expect((await (await mounted($, 100)).find({ key: 'pet' }))?.props.rows).toBe(19)
 })
+
+test('lasagne serves the dish in the scene, in cells the engine takes', async ($, on) => {
+  await start($, on)
+  const pane = await mounted($, 100)
+  const served = await $.command.run({ command: 'mission', args: 'lasagne', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await pane.unmount()
+  const strip = await (await mounted($, 100)).find({ key: 'pet' })
+
+  expect(served.text).toMatch(/lasagnes servies/)
+  expect(strip?.type).toBe('Raster')
+})
