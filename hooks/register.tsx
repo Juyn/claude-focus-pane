@@ -168,6 +168,7 @@ const pace = ($: EngineInterface, isWorking: boolean) => {
   ticker?.cancel()
   pet.restTicks = 0
   pet.isAsleep = false
+  actor.isCalled = true
   animate($, isWorking)
   ticker = $.clock.every(isWorking ? PET_WORK_MS : PET_REST_MS, () => {
     if (!isWorking) {
@@ -482,7 +483,7 @@ const animate = ($: EngineInterface, isWorking: boolean) => {
           key: 'pet',
           columns: stage.columns,
           rows: SPRITE_ROWS,
-          cells: spriteStrip(stage.columns, stage.ground, stage.ink, stage.mood),
+          cells: spriteStrip(stage.columns, stage.ground, stage.ink, stage.mood === "'" ? "'" : ''),
         })
         .catch(() => undefined)
 
@@ -606,13 +607,21 @@ const actor = {
   clock: 0,
   x: 8,
   heading: 1 as 1 | -1,
-  isSeated: true,
+  /** Lying at rest, seated when you type or between two walks, standing to walk. */
+  posture: 'lying' as 'standing' | 'seated' | 'lying',
   rested: 0,
-  restFor: 6000,
+  restFor: 1200,
   goal: 8,
   react: '' as '' | 'happy' | 'alert',
+  /** Milliseconds left of "the person is typing": it sits up and watches. */
+  typing: 0,
+  /** Set when what it should do changed: the beat in hand ends at its next frame. */
+  isCalled: false,
   queue: [] as Beat[],
 }
+
+/** How long after a keystroke it still counts the person as typing. */
+const TYPING_MS = 4000
 
 const SPRITE_TICK_MS = 60
 
@@ -651,35 +660,52 @@ const count = (length: number) => Array.from({ length }, (_unused, at) => at)
 const TURN_IN = count(CLIPS.turn.frames.length)
 const TURN_OUT = [...TURN_IN].reverse()
 
-/** What it does next, once the beat in hand is played out. */
+/**
+ * What it does next, once the beat in hand is played out. While the agent
+ * works it walks about and sits between two walks; at rest it lies down; and
+ * whenever the person types, it sits up and watches.
+ */
 const direct = (isWorking: boolean, span: number): Beat => {
   const queued = actor.queue.shift()
   if (queued !== undefined) return queued
   const isFlipped = actor.heading < 0
+  const isWatching = actor.typing > 0
+  const sit: Beat = { clip: 'sit', frames: count(CLIPS.sit.frames.length), isFlipped: false, stride: 0 }
+  const lie: Beat = { clip: 'sleep', frames: count(CLIPS.sleep.frames.length), isFlipped, stride: 0 }
 
-  if (pet.isAsleep) {
-    actor.isSeated = true
+  if (actor.posture === 'lying') {
+    if (!isWatching && !isWorking) return lie
+    // Up on its haunches first; from there it watches, or sets off.
+    actor.posture = 'seated'
+    actor.rested = 0
+    actor.restFor = 0
 
-    return { clip: 'sleep', frames: count(CLIPS.sleep.frames.length), isFlipped, stride: 0 }
+    return sit
   }
 
-  if (actor.isSeated) {
-    if (!isWorking && actor.rested < actor.restFor) {
+  if (actor.posture === 'seated') {
+    if (isWatching) return sit
+    if (!isWorking) {
+      actor.posture = 'lying'
+
+      return lie
+    }
+    if (actor.rested < actor.restFor) {
       actor.rested += CLIPS.sit.frames.length * CLIPS.sit.ms
 
-      return { clip: 'sit', frames: count(CLIPS.sit.frames.length), isFlipped: false, stride: 0 }
+      return sit
     }
     // Up again: somewhere to go, and the half turn from facing you to facing there.
     actor.goal = Math.round(Math.random() * span)
     if (Math.abs(actor.goal - actor.x) < 12) actor.goal = actor.x < span / 2 ? span : 0
     actor.heading = actor.goal >= actor.x ? 1 : -1
-    actor.isSeated = false
+    actor.posture = 'standing'
     actor.react = ''
 
     return { clip: 'turn', frames: TURN_OUT, isFlipped: actor.heading < 0, stride: 0 }
   }
 
-  if (actor.react !== '') {
+  if (actor.react !== '' && !isWatching) {
     const clip = actor.react
     actor.react = ''
 
@@ -690,32 +716,32 @@ const direct = (isWorking: boolean, span: number): Beat => {
 
   const isThere =
     actor.heading > 0 ? actor.x >= Math.min(span, actor.goal) : actor.x <= Math.max(0, actor.goal)
-  if (isThere) {
-    if (isWorking) {
-      // In a turn it does not settle: about face, and off to the other end.
-      actor.queue.push({ clip: 'turn', frames: TURN_OUT, isFlipped: !isFlipped, stride: 0 })
-      actor.heading = actor.heading > 0 ? -1 : 1
-      actor.goal = actor.heading > 0 ? span : 0
-
-      return { clip: 'turn', frames: TURN_IN, isFlipped, stride: 0 }
-    }
-    actor.isSeated = true
+  if (isWatching || !isWorking || isThere) {
+    actor.posture = 'seated'
     actor.rested = 0
-    actor.restFor = 5000 + Math.random() * 9000
+    actor.restFor = 3000 + Math.random() * 5000
 
     return { clip: 'turn', frames: TURN_IN, isFlipped, stride: 0 }
   }
 
-  return isWorking
-    ? { clip: 'run', frames: count(CLIPS.run.frames.length), isFlipped, stride: 2 * actor.heading }
-    : { clip: 'walk', frames: count(CLIPS.walk.frames.length), isFlipped, stride: actor.heading }
+  return { clip: 'walk', frames: count(CLIPS.walk.frames.length), isFlipped, stride: actor.heading }
 }
+
+/** The clips that loop, and so may be cut short when it is called to something else. */
+const LOOPS: readonly ClipName[] = ['walk', 'run', 'sit', 'sleep']
 
 /** Moves the sprite cat on by `ms`; true when what is drawn changed. */
 const stepSprite = (ms: number, isWorking: boolean, columns: number) => {
   const span = Math.max(1, columns - SPRITE_COLUMNS)
   let hasMoved = false
   actor.clock += ms
+  if (actor.typing > 0) {
+    actor.typing -= ms
+    // The typing stopped: it goes back to what the agent's state asks of it.
+    if (actor.typing <= 0) actor.isCalled = true
+  }
+  // Called while it lies still on a slow frame: no waiting that frame out.
+  if (actor.isCalled && LOOPS.includes(actor.beat.clip)) actor.clock = CLIPS[actor.beat.clip].ms
   while (actor.clock >= CLIPS[actor.beat.clip].ms) {
     actor.clock -= CLIPS[actor.beat.clip].ms
     actor.at += 1
@@ -723,7 +749,9 @@ const stepSprite = (ms: number, isWorking: boolean, columns: number) => {
     const isOut =
       actor.beat.stride !== 0 &&
       (actor.beat.stride > 0 ? actor.x >= Math.min(span, actor.goal) : actor.x <= Math.max(0, actor.goal))
-    if (actor.at >= actor.beat.frames.length || isOut) {
+    const isCut = actor.isCalled && LOOPS.includes(actor.beat.clip)
+    if (actor.at >= actor.beat.frames.length || isOut || isCut) {
+      actor.isCalled = false
       actor.beat = direct(isWorking, span)
       actor.at = 0
     }
@@ -792,10 +820,11 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
       words[cell + 2] = back
     }
   }
-  if (mood) {
+  const sign = actor.beat.clip === 'sleep' ? 'z' : mood
+  if (sign) {
     const beside = actor.beat.isFlipped ? left + 1 : left + SPRITE_COLUMNS - 2
     if (beside >= 0 && beside < columns) {
-      words[beside * 3] = mood.codePointAt(0) ?? 0x20
+      words[beside * 3] = sign.codePointAt(0) ?? 0x20
       words[beside * 3 + 1] = rgb(ink)
       words[beside * 3 + 2] = base
     }
@@ -1606,6 +1635,14 @@ export const register: Register = on => {
     // A prompt is the person asking: the pane opened behind it seats at any width.
     const seated = await read($, focus)
     if (!seated.isDismissed) void $.ui.open({ id: PANE, title: 'Focus' }).catch(() => undefined)
+
+    return next(e)
+  })
+
+  // The person is typing: the cat sits up. Nothing awaited, the keystroke must not wait.
+  on('prompt.edit', ($, e, next) => {
+    if (actor.typing <= 0) actor.isCalled = true
+    actor.typing = TYPING_MS
 
     return next(e)
   })
@@ -2463,7 +2500,7 @@ export const register: Register = on => {
             columns={room}
             rows={SPRITE_ROWS}
             // The moods are clips here; only sleep and the context warning stay a character.
-            cells={spriteStrip(room, tone.panel, tone.text, mood === "'" || mood === 'z' ? mood : '')}
+            cells={spriteStrip(room, tone.panel, tone.text, mood === "'" ? mood : '')}
           />
         )}
         {style === '3d' && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
