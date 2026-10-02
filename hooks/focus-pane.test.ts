@@ -587,16 +587,27 @@ const start = async ($: Engine, on: On) => {
 const petCommand = ($: Engine, style: string) =>
   $.command.run({ command: 'mission', args: `pet ${style}`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
 
-test('the line cat sits at the bottom of the pane, in any theme', async ($, on) => {
+test('the 3D cat walks a strip as wide as the pane; an ansi theme gets the line cat', async ($, on) => {
   engine(on)
+  const pane = await mounted($, 100)
+  const strip = await pane.find({ key: 'pet' })
+
+  expect(strip?.type).toBe('Raster')
+  expect(strip?.props.columns).toBe(98)
+  expect(strip?.props.rows).toBe(10)
+  await pane.unmount()
+
+  await wear($, 'dark-ansi')
+  expect((await (await mounted($, 100)).find({ key: 'pet' }))?.text).toMatch(/ﾐ_x ﾉ/)
+})
+
+test('pet line sits the line cat at the bottom of the pane', async ($, on) => {
+  await start($, on)
+  await petCommand($, 'line')
   const pane = await mounted($, 100)
 
   expect((await pane.find({ key: 'pet' }))?.text).toMatch(/ﾐ_x ﾉ/)
   expect(await pane.find({ type: 'Raster' })).toBeUndefined()
-  await pane.unmount()
-
-  await wear($, 'dark-ansi')
-  expect(await (await mounted($, 100)).find({ key: 'pet' })).toBeDefined()
 })
 
 test('pet pixel walks the pixel cat on a strip as wide as the pane', async ($, on) => {

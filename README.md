@@ -95,7 +95,7 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission spec <feature>` | binds a Sacred Book feature by folder name or ticket (`console-comptes`, `UNL-4844`); `spec off` unbinds |
 | `/mission mission <text>` | sets the mission by hand |
 | `/mission <text>` / `auto` | pins the action line / hands it back to the model |
-| `/mission pet line` / `pixel` / `off` | the cat at the bottom of the pane: line art (9 rows), pixels (3 rows), or sent in |
+| `/mission pet 3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: ray-marched 3D (10 rows, default), line art (9 rows), flat pixels (3 rows), or sent in |
 | `/mission demo` | fills the todo list from the bound plan, to see the pane full |
 
 With the keyboard in the pane (click it, or `ctrl+x tab`): `a` task, `t` link, `c` comment,

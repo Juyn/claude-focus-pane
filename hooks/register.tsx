@@ -59,7 +59,7 @@ const turn = atom({ plugin: 'focus-pane', key: 'turn' } as const, {
 const board = atom({ plugin: 'focus-pane', key: 'board' } as const, { notes: [], chores: [], serial: 0 })
 const feature = atom({ plugin: 'focus-pane', key: 'feature' } as const, null)
 const gallery = atom({ plugin: 'focus-pane', key: 'gallery' } as const, { status: 'idle', path: null, shots: [] })
-const petStyle = atom({ plugin: 'focus-pane', key: 'petStyle' } as const, 'line')
+const petStyle = atom({ plugin: 'focus-pane', key: 'petStyle' } as const, '3d')
 const skin = atom({ plugin: 'focus-pane', key: 'skin' } as const, 'dark')
 const command = atom({ plugin: 'focus-pane', key: 'command' } as const, null)
 
@@ -167,6 +167,7 @@ const pace = ($: EngineInterface, isWorking: boolean) => {
   ticker?.cancel()
   pet.restTicks = 0
   pet.isAsleep = false
+  animate($, isWorking)
   ticker = $.clock.every(isWorking ? PET_WORK_MS : PET_REST_MS, () => {
     if (!isWorking) {
       pet.restTicks += 1
@@ -216,15 +217,277 @@ const lineCat = (columns: number, isWorking: boolean, mood: string) => {
   })
 }
 
-/** `line`, `pixel` or `off`, from a command or the store; `on` and old booleans too. */
+/** `3d`, `line`, `pixel` or `off`, from a command or the store; `on` and old booleans too. */
 const asPetStyle = (value: unknown): PetStyle | null =>
-  value === 'line' || value === 'pixel' || value === 'off'
+  value === '3d' || value === 'line' || value === 'pixel' || value === 'off'
     ? value
     : value === 'on' || value === true
-      ? 'line'
+      ? '3d'
       : value === false
         ? 'off'
         : null
+
+// --------------------------------------------------------------- the 3D cat
+
+/** The 3D cat's sprite, in pixels: two pixel rows a terminal row. */
+const CAT3_W = 30
+const CAT3_H = 20
+const CAT3_ROWS = CAT3_H / 2
+
+/** How the 3D cat stands this frame. */
+type Pose = {
+  /** Turn about the vertical: 0 faces right, -π left, -π/2 the viewer. */
+  yaw: number
+  /** -1 to 1: where the walk cycle swings the legs. */
+  swing: number
+  /** -1 to 1: where the tail sways. */
+  tail: number
+  /** 0 standing, 1 lying with its legs tucked under. */
+  tuck: number
+  isBlinking: boolean
+}
+
+const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
+
+/** A smooth union: two shapes melt into one where they meet. */
+const blend = (a: number, b: number, k: number) => {
+  const h = Math.max(k - Math.abs(a - b), 0) / k
+
+  return Math.min(a, b) - h * h * k * 0.25
+}
+
+const blob = (
+  x: number, y: number, z: number,
+  cx: number, cy: number, cz: number,
+  rx: number, ry: number, rz: number,
+) => {
+  const dx = (x - cx) / rx
+  const dy = (y - cy) / ry
+  const dz = (z - cz) / rz
+
+  return (Math.sqrt(dx * dx + dy * dy + dz * dz) - 1) * Math.min(rx, ry, rz)
+}
+
+const limb = (
+  x: number, y: number, z: number,
+  ax: number, ay: number, az: number,
+  bx: number, by: number, bz: number,
+  r: number,
+) => {
+  const px = x - ax
+  const py = y - ay
+  const pz = z - az
+  const ex = bx - ax
+  const ey = by - ay
+  const ez = bz - az
+  const h = clamp01((px * ex + py * ey + pz * ez) / (ex * ex + ey * ey + ez * ez))
+
+  return Math.hypot(px - ex * h, py - ey * h, pz - ez * h) - r
+}
+
+/** The cat as a distance field, in its own space: it faces +x, y is up. */
+const catField = (x: number, y: number, z: number, pose: Pose) => {
+  const drop = 0.26 * pose.tuck
+  const hip = 0.5 - drop
+  const reach = 0.16 * pose.swing * (1 - pose.tuck)
+  const foot = 0.04
+
+  let d = blob(x, y, z, 0, hip, 0, 0.5, 0.26, 0.25)
+  d = blend(d, blob(x, y, z, 0.5, hip + 0.3 - 0.12 * pose.tuck, 0, 0.25, 0.24, 0.25), 0.08)
+  d = blend(d, blob(x, y, z, 0.72, hip + 0.22 - 0.12 * pose.tuck, 0, 0.1, 0.08, 0.11), 0.05)
+  const earY = hip + 0.55 - 0.12 * pose.tuck
+  d = blend(d, blob(x, y, z, 0.47, earY, 0.14, 0.07, 0.13, 0.06), 0.03)
+  d = blend(d, blob(x, y, z, 0.47, earY, -0.14, 0.07, 0.13, 0.06), 0.03)
+  // Diagonal pairs swing together, as a cat walks.
+  d = blend(d, limb(x, y, z, 0.3, hip - 0.1, 0.13, 0.3 + reach, foot, 0.13, 0.075), 0.05)
+  d = blend(d, limb(x, y, z, 0.3, hip - 0.1, -0.13, 0.3 - reach, foot, -0.13, 0.075), 0.05)
+  d = blend(d, limb(x, y, z, -0.3, hip - 0.1, 0.13, -0.3 - reach, foot, 0.13, 0.075), 0.05)
+  d = blend(d, limb(x, y, z, -0.3, hip - 0.1, -0.13, -0.3 + reach, foot, -0.13, 0.075), 0.05)
+  d = blend(
+    d,
+    limb(x, y, z, -0.45, hip + 0.08, 0, -0.74, hip + 0.5 - 0.3 * pose.tuck, 0.3 * pose.tail, 0.055),
+    0.05,
+  )
+
+  return d
+}
+
+const FUR3 = [233, 164, 91]
+const STRIPE3 = [178, 106, 44]
+const BIB3 = [247, 232, 212]
+const EYE3 = [16, 20, 31]
+const NOSE3 = [232, 120, 130]
+
+/** What the cat's coat is at a point of its surface. */
+const catCoat = (x: number, y: number, z: number, pose: Pose) => {
+  const hip = 0.5 - 0.26 * pose.tuck
+  const headY = hip + 0.3 - 0.12 * pose.tuck
+  if (!pose.isBlinking && Math.hypot(x - 0.7, y - (headY + 0.06), Math.abs(z) - 0.13) < 0.065) return EYE3
+  if (Math.hypot(x - 0.82, y - (headY - 0.05), z) < 0.04) return NOSE3
+  // White socks, and a white tip to the tail.
+  if (y < 0.11 && pose.tuck < 0.5) return BIB3
+  if (x < -0.66) return BIB3
+  if (Math.abs(x) < 0.4 && y > hip + 0.05 && Math.sin(x * 24) > 0.45) return STRIPE3
+
+  return FUR3
+}
+
+const CAM_TILT = 0.32
+const CAM_COS = Math.cos(CAM_TILT)
+const CAM_SIN = Math.sin(CAM_TILT)
+const LIGHT = [0.45, 0.78, 0.44]
+
+/**
+ * Ray-marches the cat into CAT3_W by CAT3_H pixels, 0xRRGGBB each, or -1 where
+ * the ray meets nothing. An orthographic camera, a little above, looking in.
+ */
+const renderCat = (pose: Pose) => {
+  const out = new Int32Array(CAT3_W * CAT3_H)
+  const cos = Math.cos(pose.yaw)
+  const sin = Math.sin(pose.yaw)
+  const scale = 2.3 / CAT3_W
+  // The camera and the light, turned into the cat's own space.
+  const turn = (x: number, y: number, z: number) => [x * cos - z * sin, y, x * sin + z * cos] as const
+  const [fx, fy, fz] = turn(0, -CAM_SIN, -CAM_COS)
+  const [lx, ly, lz] = turn(LIGHT[0] ?? 0, LIGHT[1] ?? 0, LIGHT[2] ?? 0)
+  const field = (x: number, y: number, z: number) => catField(x, y, z, pose)
+
+  for (let j = 0; j < CAT3_H; j += 1) {
+    for (let i = 0; i < CAT3_W; i += 1) {
+      const u = (i + 0.5 - CAT3_W / 2) * scale
+      const v = (CAT3_H / 2 - j - 0.5) * scale + 0.52
+      const [ox, oy, oz] = turn(u, v * CAM_COS + 3 * CAM_SIN, -v * CAM_SIN + 3 * CAM_COS)
+      let t = 1.6
+      let hit = false
+      for (let step = 0; step < 28 && t < 4.6; step += 1) {
+        const d = field(ox + fx * t, oy + fy * t, oz + fz * t)
+        if (d < 0.012) {
+          hit = true
+          break
+        }
+        t += d
+      }
+      if (!hit) {
+        out[j * CAT3_W + i] = -1
+        continue
+      }
+      const x = ox + fx * t
+      const y = oy + fy * t
+      const z = oz + fz * t
+      const e = 0.02
+      const nx = field(x + e, y, z) - field(x - e, y, z)
+      const ny = field(x, y + e, z) - field(x, y - e, z)
+      const nz = field(x, y, z + e) - field(x, y, z - e)
+      const n = Math.hypot(nx, ny, nz) || 1
+      const lit = 0.42 + 0.7 * Math.max(0, (nx * lx + ny * ly + nz * lz) / n)
+      const coat = catCoat(x, y, z, pose)
+      const tone = (at: number) => Math.min(255, Math.round((coat[at] ?? 0) * lit))
+      out[j * CAT3_W + i] = (tone(0) << 16) | (tone(1) << 8) | tone(2)
+    }
+  }
+
+  return out
+}
+
+/** Where the 3D cat is in its walk: module values, as the other cats' are. */
+const cat3 = { x: 4, heading: 1 as 1 | -1, yaw: 0, phase: 0, look: 0, frame: 0 }
+
+/** Its own clock, quicker than the pane's: frames go out by `$.ui.blit`. */
+const CAT3_FRAME_MS = 90
+let animator: Timer | undefined
+
+/** What the strip is drawn at, from the last render: a blit must match it. */
+const stage = { columns: 0, ground: '', ink: '', mood: '', isLive: false }
+
+const FACING_VIEWER = -Math.PI / 2
+
+/** One frame of its life: it walks, turns round at an edge, stops to look at you. */
+const stepCat3 = (isWorking: boolean) => {
+  cat3.frame += 1
+  const span = Math.max(1, stage.columns - CAT3_W)
+  if (pet.isAsleep) return
+  if (cat3.look > 0) cat3.look -= 1
+  else if (!isWorking && Math.random() < 0.006) cat3.look = 28
+
+  const goal = cat3.look > 0 ? FACING_VIEWER : cat3.heading > 0 ? 0 : -Math.PI
+  const off = goal - cat3.yaw
+  cat3.yaw += Math.max(-0.22, Math.min(0.22, off))
+  // It walks only once it faces the way it goes.
+  if (cat3.look > 0 || Math.abs(off) > 0.3) return
+
+  const pace3 = isWorking ? 0.55 : 0.2
+  cat3.x += cat3.heading * pace3
+  cat3.phase += pace3 * 1.1
+  if (cat3.x >= span) {
+    cat3.x = span
+    cat3.heading = -1
+  } else if (cat3.x <= 0) {
+    cat3.x = 0
+    cat3.heading = 1
+  }
+}
+
+/** The strip the 3D cat walks, as Raster cells: `columns` wide, CAT3_ROWS tall. */
+const cat3Strip = (columns: number, ground: string, ink: string, mood: string) => {
+  const isStill = pet.isAsleep || cat3.look > 0
+  const sprite = renderCat({
+    yaw: pet.isAsleep ? 0.5 : cat3.yaw,
+    swing: isStill ? 0 : Math.sin(cat3.phase),
+    tail: Math.sin(cat3.frame * 0.22),
+    tuck: pet.isAsleep ? 1 : 0,
+    isBlinking: pet.isAsleep || cat3.frame % 46 < 2,
+  })
+  const left = Math.round(Math.max(0, Math.min(cat3.x, columns - CAT3_W)))
+  const base = rgb(ground)
+  const words = new Uint32Array(columns * CAT3_ROWS * 3)
+  const at = (row: number, x: number) => {
+    const inSprite = x - left
+    if (inSprite < 0 || inSprite >= CAT3_W) return base
+    const seen = sprite[row * CAT3_W + inSprite] ?? -1
+
+    return seen < 0 ? base : seen
+  }
+  for (let row = 0; row < CAT3_ROWS; row += 1) {
+    for (let x = 0; x < columns; x += 1) {
+      const cell = (row * columns + x) * 3
+      words[cell] = UPPER_HALF
+      words[cell + 1] = at(row * 2, x)
+      words[cell + 2] = at(row * 2 + 1, x)
+    }
+  }
+  if (mood) {
+    const beside = cat3.heading > 0 ? left + CAT3_W - 4 : left + 3
+    if (beside >= 0 && beside < columns) {
+      words[beside * 3] = mood.codePointAt(0) ?? 0x20
+      words[beside * 3 + 1] = rgb(ink)
+      words[beside * 3 + 2] = base
+    }
+  }
+
+  return toBase64(new Uint8Array(words.buffer))
+}
+
+/** Starts the 3D cat's frames; it stops by itself once asleep or off stage. */
+const animate = ($: EngineInterface, isWorking: boolean) => {
+  animator?.cancel()
+  animator = $.clock.every(CAT3_FRAME_MS, () => {
+    if (!stage.isLive || stage.columns === 0) return
+    stepCat3(isWorking)
+    void $.ui
+      .blit({
+        requestId: PANE,
+        key: 'pet',
+        columns: stage.columns,
+        rows: CAT3_ROWS,
+        cells: cat3Strip(stage.columns, stage.ground, stage.ink, stage.mood),
+      })
+      .catch(() => undefined)
+    if (pet.isAsleep) {
+      animator?.cancel()
+      animator = undefined
+    }
+  })
+}
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 const sextet = (word: number, shift: number) => ALPHABET[(word >> shift) & 63] ?? ''
@@ -495,7 +758,7 @@ const skinOf = (value: unknown): Skin => {
  */
 const COMMAND = {
   description: 'Rouvre et cadre le pane Unlocker',
-  argumentHint: 'auto | mission <texte> | spec <feature|off> | pet <line|pixel|off> | demo | UNL-1234 <texte>',
+  argumentHint: 'auto | mission <texte> | spec <feature|off> | pet <3d|line|pixel|off> | demo | UNL-1234 <texte>',
 }
 
 const claimCommand = async ($: EngineInterface, isFreshLoad = false) => {
@@ -961,8 +1224,8 @@ export const register: Register = on => {
     }
 
     if (args === 'pet' || args.startsWith('pet ')) {
-      const style = asPetStyle(args.slice('pet'.length).trim() || 'line')
-      if (style === null) return { text: 'Focus pane: pet line | pixel | off.' }
+      const style = asPetStyle(args.slice('pet'.length).trim() || '3d')
+      if (style === null) return { text: 'Focus pane: pet 3d | line | pixel | off.' }
       await update($, petStyle, () => style)
       await $.store.set('pet', style).catch(() => undefined)
 
@@ -970,7 +1233,7 @@ export const register: Register = on => {
         text:
           style === 'off'
             ? 'Focus pane: le chat est rentré.'
-            : `Focus pane: le chat est là (${style === 'line' ? 'au trait' : 'en pixels'}).`,
+            : `Focus pane: le chat est là (${style === '3d' ? 'en 3D' : style === 'line' ? 'au trait' : 'en pixels'}).`,
       }
     }
 
@@ -1479,8 +1742,9 @@ export const register: Register = on => {
     const Raster = 'Raster' in table ? table.Raster : undefined
     const asked: PetStyle = await read($, petStyle)
     const canPixel = Raster !== undefined && tone.panel !== undefined && tone.text !== undefined
-    const style: PetStyle = asked === 'pixel' && !canPixel ? 'line' : asked
-    const petRows = style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
+    const style: PetStyle = (asked === 'pixel' || asked === '3d') && !canPixel ? 'line' : asked
+    const petRows =
+      style === '3d' ? CAT3_ROWS : style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
     const mood = pet.isAsleep
       ? 'z'
       : pet.moodTicks > 0
@@ -1488,6 +1752,12 @@ export const register: Register = on => {
         : spent.percent !== null && spent.percent >= 80
           ? "'"
           : ''
+    // What the animator blits at, between two renders.
+    stage.columns = room
+    stage.ground = tone.panel ?? ''
+    stage.ink = tone.text ?? ''
+    stage.mood = mood
+    stage.isLive = style === '3d'
 
     const rowsOf = (outlines: number, todosKept: number, share: number) => {
       const paperRows = (one: Doc) =>
@@ -1870,6 +2140,14 @@ export const register: Register = on => {
             columns={room}
             rows={PET_ROWS}
             cells={petStrip(room, tone.panel, tone.text, mood)}
+          />
+        )}
+        {style === '3d' && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
+          <Raster
+            key="pet"
+            columns={room}
+            rows={CAT3_ROWS}
+            cells={cat3Strip(room, tone.panel, tone.text, mood)}
           />
         )}
         {style === 'line' && (
