@@ -639,7 +639,14 @@ export const register: Register = on => {
     // The pane first: nothing below may keep it off screen. A refused call here
     // throws, and a thrown hook is skipped whole — which is how /focus, already
     // a built-in, once took the pane down with it.
-    void $.ui.open({ id: PANE, title: 'Focus' }).catch(() => undefined)
+    // Unasked, the engine seats a pane only from 144 columns: below that it waits,
+    // and the person's first prompt opens it (prompt.submit), at any width.
+    void $.ui
+      .open({ id: PANE, title: 'Focus' })
+      .then(opened => {
+        if (!opened.isPlaced) $.ui.toast('focus-pane : le pane s\'ouvrira à ton premier message')
+      })
+      .catch(() => undefined)
 
     await claimCommand($, true).catch(reason => {
       $.ui.toast(`focus-pane: commande non enregistrée (${String(reason)})`)
@@ -751,6 +758,10 @@ export const register: Register = on => {
       ticket: hit ? hit[0] : was.ticket,
       mission: was.mission ?? (isMissionWorthy(asked) ? cut(asked, 200) : null),
     }))
+
+    // A prompt is the person asking: the pane opened behind it seats at any width.
+    const seated = await read($, focus)
+    if (!seated.isDismissed) void $.ui.open({ id: PANE, title: 'Focus' }).catch(() => undefined)
 
     return next(e)
   })

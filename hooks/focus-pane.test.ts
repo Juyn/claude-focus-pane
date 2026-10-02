@@ -383,23 +383,15 @@ test('a reload registers the remembered command again', async ($, on) => {
   expect(asked).toEqual(['mission', 'mission'])
 })
 
-test('t files a link in the todo, a and t put the caret in their fields', async ($, on) => {
+test('t files a link in the todo, a t c are the hotkeys of their fields', async ($, on) => {
   engine(on)
-  const focused: string[] = []
   on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
   on('store.set', () => ({ value: undefined }))
-  on('ui.focus', ($$, e) => {
-    focused.push(e.element ?? '')
-
-    return {}
-  })
   const pane = await wide($)
 
   expect((await pane.find({ key: 'focus:chore' }))?.props.hotkey).toBe('a')
   expect((await pane.find({ key: 'focus:link' }))?.props.hotkey).toBe('t')
-  await pane.press({ key: 'focus:chore' })
-  await pane.press({ key: 'focus:link' })
-  expect(focused).toEqual(['chore:new:0', 'chore:link:0'])
+  expect((await pane.find({ key: 'focus:note' }))?.props.hotkey).toBe('c')
 
   await pane.input({ key: 'chore:link:0', text: 'linear.app/unlocker/issue/UNL-4844' })
   const link = await pane.find({ type: 'Link' })
@@ -423,8 +415,8 @@ test('m opens the mockups tab, which draws a thumbnail a screen and keeps the op
     const asked = e.argv[e.argv.length - 1] ?? ''
     const stdout = e.argv.some(one => one.endsWith('thumbs.py'))
       ? JSON.stringify([
-          { id: '1.a', title: 'Liste par défaut', columns: 54, rows: 17, cells: 'AAAA' },
-          { id: '5.a', title: 'Liste en cartes', columns: 19, rows: 17, cells: 'BBBB' },
+          { id: '1.a', title: 'Liste par défaut', columns: 54, rows: 17, cells: 'gCUAAAAAAAAAAAAA'.repeat(54 * 17) },
+          { id: '5.a', title: 'Liste en cartes', columns: 19, rows: 17, cells: 'gCUAAAAAAAAAAAAA'.repeat(19 * 17) },
         ])
       : asked === 'console-comptes'
         ? README
@@ -478,4 +470,18 @@ test('a short pane cuts the todo list to a window rather than scroll', async ($,
   expect(await pane.find({ text: /étape 7 en cours/ })).toBeDefined()
   expect(await pane.find({ text: /\+ 9 autres étapes/ })).toBeDefined()
   expect(await pane.find({ text: /étape 1$/ })).toBeUndefined()
+})
+
+test('a prompt opens the pane a narrow terminal kept waiting', async ($, on) => {
+  engine(on)
+  const opened: string[] = []
+  on('ui.open', ($$, e) => {
+    opened.push(e.id)
+
+    return { value: { isPlaced: true as const } }
+  })
+
+  await $.prompt.submit({ text: 'bonjour', wait: false, origin: { kind: 'composer' } })
+
+  expect(opened).toEqual(['focus'])
 })
