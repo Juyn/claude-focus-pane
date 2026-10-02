@@ -58,6 +58,9 @@ export type Feature = {
 }
 
 /** How the cat at the bottom of the pane is drawn: the sprite sheet, ray-marched in 3D, line art, flat pixels, or not at all. */
+/** Which cat walks the pane: a folder of sheets under assets/cats/. */
+export type PetCoat = 'roux' | 'noir' | 'garfield'
+
 export type PetStyle = 'png' | 'big' | 'sprite' | '3d' | 'line' | 'pixel' | 'off'
 
 /** The mockups tab: the screens of the bound mockup, shot once by thumbs.py. */
@@ -112,6 +115,7 @@ declare module 'claude-code' {
       feature: Feature | null
       gallery: Gallery
       petStyle: PetStyle
+      petCoat: PetCoat
       turn: TurnState
       skin: Skin
       /** The slash command the engine actually granted, or null while it has none. */

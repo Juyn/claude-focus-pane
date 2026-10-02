@@ -96,7 +96,8 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission mission <text>` | sets the mission by hand |
 | `/mission <text>` / `auto` | pins the action line / hands it back to the model |
 | (the scene) | the sprite cat lives in a small meadow: grass, blooms, a bug ambling by, dust raised by each tool call, sparks on a finished todo, and a speech bubble — canned lines for events, and one quip a turn start and a turn end, worded by haiku |
-| `/mission pet big` | the same cat from the 64×36 sheet, twice as large: 64 columns by 19 rows, three times the pixels |
+| `/mission cat roux` / `noir` / `garfield` | which cat walks the pane; remembered |
+| `/mission pet sprite` / `big` | its size: small (32 columns, 10 to 13 rows) or big (64 columns by 19 rows, three times the pixels) |
 | `/mission pet png` | the cat as a real image (64×36 frames from `assets/frames/`, 9 rows), where the terminal draws pictures (kitty graphics protocol); elsewhere it says so and falls back to `sprite`. `python3 scripts/build-frames.py` cuts the frames |
 | `/mission pet sprite` / `3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: the sprite sheet (12 rows, default), ray-marched 3D (10 rows), line art (9 rows), flat pixels (3 rows), or sent in |
 | `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity, notes — to see it full; the notes are shown, never stored |
@@ -117,12 +118,13 @@ bunx --package typescript tsc -p .
 claude plugin test .
 ```
 
-The sprite cat is `assets/cat-sheet.png` (32×24 frames, described by `assets/cat-sheet.json`), baked
-into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet. A 64×36 sheet
-is squeezed to 64×24 at bake time and drawn in quadrants, four pixels and two colors a cell: twice
-the detail across at the same size on screen. Sextants would keep all 36 rows, but a Raster cell
-refuses any character beyond the Basic Multilingual Plane. Both sheets are baked and drawn in
-half blocks: `pet sprite` the 32×24 one, `pet big` the 64×36 one.
+The cats live under `assets/cats/<name>/`: `cat-sheet.png` is the 64×36 sheet drawn big, and
+`cat-sheet-small.png` a 32×24 one where the cat has it (else the big sheet is sampled down by half);
+each has its JSON manifest beside it. `python3 scripts/build-sprites.py` bakes them all into the
+module: run it again after changing or adding a sheet (a new cat is a folder, a name in the script's
+`ORDER`, and a value of `PetCoat`). Both sizes are drawn in half blocks, one pixel a half cell: a
+Raster cell takes no character beyond the Basic Multilingual Plane, which rules sextants out, and a
+quadrant's pixel is twice as tall as wide, which squeezes a square sheet.
 
 `hooks/register.tsx` is the module, `types/index.d.ts` its state contract, `scripts/thumbs.py` the
 thumbnail shooter (cached in `~/.cache/focus-pane`). With `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` an edit

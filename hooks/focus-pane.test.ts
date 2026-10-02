@@ -659,3 +659,16 @@ test('pet big draws the 64 by 36 sheet over 18 rows and its ground', async ($, o
   expect(strip?.type).toBe('Raster')
   expect(strip?.props.rows).toBe(19)
 })
+
+test('cat picks which cat walks the pane, at either size', async ($, on) => {
+  await start($, on)
+  await $.command.run({ command: 'mission', args: 'cat noir', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  const small = await mounted($, 100)
+
+  // The black cat has no small sheet of its own: the big one by half, 9 rows and the ground.
+  expect((await small.find({ key: 'pet' }))?.props.rows).toBe(10)
+  await small.unmount()
+
+  await petCommand($, 'big')
+  expect((await (await mounted($, 100)).find({ key: 'pet' }))?.props.rows).toBe(19)
+})

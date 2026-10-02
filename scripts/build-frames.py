@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cuts assets/v2-64x36/cat-sheet.png into one PNG a frame, for the `png` cat.
+"""Cuts assets/cats/roux/cat-sheet.png into one PNG a frame, for the `png` cat.
 
 Where the terminal draws real images (the kitty graphics protocol), the cat is
 an Image fed these files: each frame enlarged six times with hard edges, and
@@ -9,7 +9,7 @@ the sheet changes.
 import json, os, shutil, subprocess
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-home = os.path.join(root, 'assets', 'v2-64x36')
+home = os.path.join(root, 'assets', 'cats', 'roux')
 sheet = json.load(open(os.path.join(home, 'cat-sheet.json')))
 width, height, scale = sheet['frameWidth'], sheet['frameHeight'], 6
 out = os.path.join(root, 'assets', 'frames')
