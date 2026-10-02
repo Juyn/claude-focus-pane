@@ -169,7 +169,7 @@ test('a tool call lands in the feed with its badge and how it ended', async ($, 
   const pane = await wide($)
 
   expect(await pane.find({ text: /git push --force origin main/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: ' Bash    ' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: ' Bash     ' })).toBeDefined()
   expect(await pane.find({ text: '✗ ÉCHEC' })).toBeDefined()
   expect(await pane.find({ text: /aucune activité/ })).toBeUndefined()
 })
@@ -512,4 +512,60 @@ test('the task tools fill the plan as TodoWrite does', async ($, on) => {
   expect(await pane.find({ text: /○ Conformer api-v2/ })).toBeDefined()
   expect(await pane.find({ text: /À jeter$/ })).toBeUndefined()
   expect(await pane.find({ text: '0/2' })).toBeDefined()
+})
+
+test('an agent reading a Sacred Book document binds its feature, as a ticket in a prompt does', async ($, on) => {
+  engine(on)
+  const asked: string[] = []
+  on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
+  on('store.set', () => ({ value: undefined }))
+  on('process.run', ($$, e) => {
+    const last = e.argv[e.argv.length - 1] ?? ''
+    asked.push(last)
+    const stdout =
+      last === 'console-comptes' || last === 'UNL-4844' ? README : last.endsWith('spec.md') ? SPEC : last.endsWith('plan.md') ? PLAN : ''
+
+    return { value: { exitCode: stdout ? 0 : 1, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  await $.tool.call({ tool: 'Read', file_path: '/home/xavier/Sites/sacred-book/v2/banking/console-comptes/README.md' })
+  const pane = await mounted($, 120)
+  expect(await pane.find({ text: 'Console admin — comptes' })).toBeDefined()
+  expect(asked[0]).toBe('console-comptes')
+})
+
+test('a ticket in a prompt binds its feature, whatever its case', async ($, on) => {
+  engine(on)
+  on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
+  on('store.set', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('process.run', ($$, e) => {
+    const last = e.argv[e.argv.length - 1] ?? ''
+    const stdout = last === 'UNL-4844' ? README : last.endsWith('spec.md') ? SPEC : last.endsWith('plan.md') ? PLAN : ''
+
+    return { value: { exitCode: stdout ? 0 : 1, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  await $.prompt.submit({ text: 'on attaque unl-4844', wait: false, origin: { kind: 'composer' } })
+  const pane = await mounted($, 120)
+
+  expect(await pane.find({ key: 'doc:plan' })).toBeDefined()
+  expect(await pane.find({ text: ' UNL-4844 ' })).toBeDefined()
+})
+
+test('the feed names an MCP call by its server and tool, a shell call by its purpose', async ($, on) => {
+  engine(on)
+  await $.tool.call({ tool: 'mcp__linear-unlocker__save_issue' as never, id: 'UNL-4854' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'D=/tmp/x; psql "$D" -f s.sql', description: 'Simuler le script SQL' })
+  const pane = await $.ui.mount({
+    plugin: 'focus-pane',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: PANE,
+    props: { ...PROPS, bodyColumns: 100, scroll: { offset: 0, bodyRows: 60 } },
+  })
+
+  expect(await pane.find({ type: 'Text', text: ' MCP      ' })).toBeDefined()
+  expect(await pane.find({ text: /linear-unlocker › save_issue/ })).toBeDefined()
+  expect(await pane.find({ text: /Simuler le script SQL/ })).toBeDefined()
 })

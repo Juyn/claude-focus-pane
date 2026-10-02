@@ -22,7 +22,14 @@ const CANDIDATES = ['mission', 'focus-pane', 'unlocker', 'pane'] as const
 
 /** The ticket prefixes worth catching in a prompt; edit this line, not the regex. */
 const PREFIXES = ['UNL']
-const TICKET = new RegExp(`\\b(?:${PREFIXES.join('|')})-\\d{1,6}\\b`)
+const TICKET = new RegExp(`\\b(?:${PREFIXES.join('|')})-\\d{1,6}\\b`, 'i')
+
+/** A Sacred Book document, by its checkout path or its GitHub URL: the feature's folder. */
+const BOOK_PATH = /sacred-book\/(?:blob\/main\/|tree\/main\/)?(v[12]\/[\w-]+\/(?:bug\/)?[\w-]+)\//
+
+/** Queries that found no feature: a module value, so each is searched once a load. */
+const missed = new Set<string>()
+
 
 const focus = atom({ plugin: 'focus-pane', key: 'focus' } as const, {
   ticket: null,
@@ -76,7 +83,7 @@ const SACRED_BOOK = 'https://github.com/unlocker-io/sacred-book/blob/main'
 const FIND = `
 cd "\${SACRED_BOOK_DIR:-$HOME/Sites/sacred-book}" || exit 2
 d=$(find v1 v2 -maxdepth 4 -type d -name "$1" 2>/dev/null | head -n 1)
-[ -z "$d" ] && d=$(grep -rlw --include=README.md -- "$1" v1 v2 2>/dev/null | head -n 1 | xargs -r dirname)
+[ -z "$d" ] && d=$(grep -rliw --include=README.md -- "$1" v1 v2 2>/dev/null | head -n 1 | xargs -r dirname)
 [ -z "$d" ] && exit 1
 echo "$d"
 cat "$d/README.md"
@@ -122,17 +129,53 @@ const isMissionWorthy = (text: string) => text.length >= 16 && !text.startsWith(
 /** What the running tool is working on, from whichever argument carries it. */
 const detailOf = (e: object) => {
   const args = e as Record<string, unknown>
+  const tool = asText(args.tool)
+  // An MCP tool is named mcp__<server>__<tool>: the two are what it is doing.
+  const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
+  const questions = Array.isArray(args.questions) ? (args.questions[0] as Record<string, unknown> | null) : null
   const first =
+    (mcp ? `${mcp[1]} › ${mcp[2]}` : '') ||
+    // A shell command says what it is for better than how it does it.
+    (tool === 'Bash' ? asText(args.description) : '') ||
     asText(args.command) ||
     asText(args.file_path) ||
     asText(args.pattern) ||
     asText(args.description) ||
+    asText(args.subject) ||
+    asText(args.taskId) ||
     asText(args.skill) ||
     asText(args.url) ||
     asText(args.query) ||
+    asText(questions?.question) ||
+    asText(args.prompt) ||
     asText(args.path)
 
   return first.replace(/\s+/g, ' ')
+}
+
+/** The feed's badge for a tool: its name, or a short one where the name is long. */
+const SHORT: Record<string, string> = {
+  AskUserQuestion: 'Ask',
+  ToolSearch: 'Tools',
+  NotebookEdit: 'Notebook',
+  TodoWrite: 'Todo',
+  TaskCreate: 'Task',
+  TaskUpdate: 'Task',
+  TaskList: 'Task',
+  TaskGet: 'Task',
+  WebFetch: 'Fetch',
+  WebSearch: 'Search',
+  ExitPlanMode: 'Plan',
+}
+const labelOf = (tool: string) => (tool.startsWith('mcp__') ? 'MCP' : (SHORT[tool] ?? tool))
+
+/** What a tool call was given, flattened: where a path or a ticket is looked for. */
+const said = (e: object) => {
+  try {
+    return JSON.stringify(e).slice(0, 4000)
+  } catch {
+    return ''
+  }
 }
 
 /** TodoWrite's list as this mod keeps it, whatever the payload turns out to be. */
@@ -514,7 +557,7 @@ const bindFeature = async ($: EngineInterface, query: string): Promise<Feature |
   const bound: Feature = {
     path,
     title: readme.find(row => row.startsWith('# '))?.slice(2).trim() ?? path,
-    ticket: readme.join('\n').match(TICKET)?.[0] ?? null,
+    ticket: readme.join('\n').match(TICKET)?.[0]?.toUpperCase() ?? null,
     docs,
   }
   await update($, feature, () => bound)
@@ -567,6 +610,25 @@ const loadGallery = async ($: EngineInterface) => {
     path: design.path,
     shots,
   }))
+}
+
+/**
+ * Binds the feature a text points at, when the pane has none: a Sacred Book path
+ * or URL first, else a ticket key. `isWrite` rebinds, the agent being at work on
+ * that feature's documents; a mere read of another feature leaves the binding.
+ */
+const noticeFeature = async ($: EngineInterface, text: string, isWrite = false) => {
+  const now = await read($, feature)
+  const path = text.match(BOOK_PATH)?.[1]
+  if (path !== undefined) {
+    if (now?.path === path || (now !== null && !isWrite) || missed.has(path)) return
+    if ((await bindFeature($, path.split('/').pop() ?? path).catch(() => null)) === null) missed.add(path)
+
+    return
+  }
+  const ticket = text.match(TICKET)?.[0]?.toUpperCase()
+  if (ticket === undefined || now !== null || missed.has(ticket)) return
+  if ((await bindFeature($, ticket).catch(() => null)) === null) missed.add(ticket)
 }
 
 /** A todo list off the bound plan's own steps, for showing the pane full. */
@@ -671,7 +733,7 @@ export const register: Register = on => {
     await update($, focus, was => ({
       ...was,
       branch: branch || null,
-      ticket: was.ticket ?? (hit ? hit[0] : null),
+      ticket: was.ticket ?? (hit ? hit[0].toUpperCase() : null),
     }))
     // The feature this checkout was last bound to, read again: the files moved on.
     // Only in a checkout on a branch: a bare folder (a workspace root) is no one
@@ -704,6 +766,8 @@ export const register: Register = on => {
         await update($, feature, () => null)
         await $.store.delete(`feature:${await $.session.cwd()}`).catch(() => undefined)
 
+        missed.clear()
+
         return { text: 'Focus pane: plus de feature Sacred Book liée.' }
       }
       const bound = await bindFeature($, asked.replace(/\/+$/, '').split('/').pop() ?? asked)
@@ -730,7 +794,7 @@ export const register: Register = on => {
     await update($, focus, was => ({
       ...was,
       isDismissed: false,
-      ticket: hit ? hit[0] : was.ticket,
+      ticket: hit ? hit[0].toUpperCase() : was.ticket,
       mission: isMission && rest ? cut(rest, 200) : was.mission,
       isMissionPhrased: isMission && rest ? true : was.isMissionPhrased,
       summary: isMission || args === 'auto' ? was.summary : rest || was.summary,
@@ -759,9 +823,12 @@ export const register: Register = on => {
     await update($, focus, was => ({
       ...was,
       ask: e.text,
-      ticket: hit ? hit[0] : was.ticket,
+      ticket: hit ? hit[0].toUpperCase() : was.ticket,
       mission: was.mission ?? (isMissionWorthy(asked) ? cut(asked, 200) : null),
     }))
+
+    // A ticket or a Sacred Book link in the prompt names the feature in hand.
+    await noticeFeature($, e.text).catch(() => undefined)
 
     // A prompt is the person asking: the pane opened behind it seats at any width.
     const seated = await read($, focus)
@@ -794,6 +861,17 @@ export const register: Register = on => {
     const id = `${at}-${sequence}`
     const row: FeedRow = { id, tool: String(e.tool), detail: detailOf(e), at, ms: null, isError: false }
     await update($, feed, was => [row, ...was].slice(0, FEED_KEPT))
+
+    // An agent reading or writing a Sacred Book document names the feature in hand.
+    const given = said(e)
+    if (given.includes('sacred-book')) {
+      // The documents may just have been published: a ticket that found none is asked again.
+      missed.clear()
+      const isWrite = row.tool === 'Write' || row.tool === 'Edit'
+      await noticeFeature($, given, isWrite).catch(() => undefined)
+      const known = (await read($, focus)).ticket
+      if (known) await noticeFeature($, known).catch(() => undefined)
+    }
 
     const close = async (isError: boolean) => {
       const ms = (await $.clock.now()) - at
@@ -910,6 +988,12 @@ export const register: Register = on => {
     )
     await meterUsage($).catch(() => undefined)
 
+    // The answer often links the documents it published; else the ticket is asked again.
+    missed.clear()
+    await noticeFeature($, e.answer).catch(() => undefined)
+    const known = (await read($, focus)).ticket
+    if (known) await noticeFeature($, known).catch(() => undefined)
+
     const seated = await read($, focus)
     const ask = seated.ask.trim()
     if (seated.isPinned || e.isAborted || (!ask && !seated.summary)) return ran
@@ -921,9 +1005,12 @@ export const register: Register = on => {
           model: 'haiku',
           maxTokens: 80,
           system:
-            'Tu reformules la demande initiale en une mission. Une seule phrase nominale de ' +
+            "Tu dis la mission d'une session de dev : le but de fond, pas la première action. Une seule phrase nominale de " +
             '12 mots maximum, en français, sans guillemets, sans préambule, sans point final.',
-          prompt: `Demande initiale :\n${seated.mission}`,
+          prompt:
+            `Ticket : ${seated.ticket ?? 'aucun'}\n\n` +
+            `Demande initiale :\n${seated.mission}\n\n` +
+            `Ce que l'agent a compris et fait au premier tour :\n${e.answer.slice(0, 1500) || 'rien de visible'}`,
         })
         const line = phrased.isAnswered ? phrased.text.trim().split('\n')[0]?.trim() : ''
         if (line) {
@@ -1371,7 +1458,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    const badgeWidth = 7
+    const badgeWidth = 8
     const event = (one: FeedRow) => {
       const isLive = one.ms === null
       const ground = one.isError ? tone.badBackground : tone.card
@@ -1393,7 +1480,7 @@ export const register: Register = on => {
         >
           <Text backgroundColor={ground} wrap="truncate-end">
             <Text {...quiet(tone, ground)}>{`${stamp(one.at)}  `}</Text>
-            {chip(parts, cut(one.tool, badgeWidth).padEnd(badgeWidth), badge.background, badge.text)}
+            {chip(parts, cut(labelOf(one.tool), badgeWidth).padEnd(badgeWidth), badge.background, badge.text)}
             <Text color={one.isError ? tone.bad : tone.text} bold={isLive} backgroundColor={ground}>
               {`  ${cut(one.detail || '—', Math.max(6, free))}`}
             </Text>
