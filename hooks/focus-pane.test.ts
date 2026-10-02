@@ -693,9 +693,17 @@ test('on the desktop the cat is one self-playing Svg', async ($, on) => {
     requestId: PANE,
     props: { ...PROPS, bodyColumns: 100 },
   })
-  const cat = await pane.find({ type: 'Svg' })
+  // The meters are small Svg bars there too: the cat is the one that plays.
+  const sources: string[] = []
+  const walk = (node: unknown) => {
+    const one = node as { type?: string; props?: { source?: unknown }; children?: unknown[] } | null
+    if (!one || typeof one !== 'object') return
+    if (one.type === 'Svg') sources.push(String(one.props?.source))
+    for (const child of one.children ?? []) walk(child)
+  }
+  walk(await pane.drawn())
 
-  expect(cat?.type).toBe('Svg')
-  expect(String(cat?.props.source)).toMatch(/@keyframes play/)
+  expect(sources.filter(one => /@keyframes play/.test(one))).toHaveLength(1)
+  expect(sources.filter(one => /viewBox="0 0 100 3"/.test(one))).toHaveLength(2)
   expect(await pane.find({ type: 'Raster' })).toBeUndefined()
 })

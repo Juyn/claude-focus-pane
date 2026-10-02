@@ -1,5 +1,13 @@
 import { atom, read, update } from 'claude-code'
-import type { BoxProps, ElementConstructor, EngineInterface, Register, TextProps, Timer } from 'claude-code'
+import type {
+  BoxProps,
+  ElementConstructor,
+  EngineInterface,
+  Register,
+  SvgProps,
+  TextProps,
+  Timer,
+} from 'claude-code'
 
 import type { Board, Doc, Feature, FeedRow, Gallery, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
 
@@ -2123,6 +2131,8 @@ const stamp = (at: number) => {
 type Elements = {
   Box: ElementConstructor<BoxProps>
   Text: ElementConstructor<TextProps>
+  /** Where the surface draws real pictures and no grid of cells: the desktop. */
+  Svg?: ElementConstructor<SvgProps>
 }
 
 /** Secondary text: the palette's own grey, or the terminal's dim under ANSI. */
@@ -2165,7 +2175,23 @@ const legend = (
 )
 
 /** A thin progress line: the filled part in its color, the rest as a track. */
-const meter = ({ Text }: Elements, tone: Tone, ratio: number, width: number, color: string | undefined) => {
+const meter = ({ Text, Svg }: Elements, tone: Tone, ratio: number, width: number, color: string | undefined) => {
+  // Off the terminal a row of characters has no known width: a drawn bar fits its card.
+  if (Svg !== undefined) {
+    const share = Math.max(0, Math.min(100, ratio * 100))
+
+    return (
+      <Svg
+        height={3}
+        alt={`${Math.round(share)} %`}
+        source={
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 3" width="100%" height="3" preserveAspectRatio="none">` +
+          `<rect width="100" height="3" rx="1" fill="${tone.track ?? '#2a3350'}"/>` +
+          `<rect width="${share.toFixed(1)}" height="3" rx="1" fill="${color ?? '#406aff'}"/></svg>`
+        }
+      />
+    )
+  }
   const filled = Math.max(0, Math.min(width, Math.round(ratio * width)))
 
   return (
@@ -3042,7 +3068,7 @@ export const register: Register = on => {
     const tone = TONES[await read($, skin)]
     const mine = await read($, command)
     const now = await $.clock.now()
-    const parts: Elements = { Box, Text }
+    const parts: Elements = { Box, Text, Svg: e.surface !== 'terminal' && 'Svg' in table ? table.Svg : undefined }
     const inner = room - 4
     const briefWidth = Math.max(8, inner - 10)
 
@@ -3667,7 +3693,7 @@ export const register: Register = on => {
     const tone = TONES[await read($, skin)]
     const bound: Feature | null = await read($, feature)
     const seen: Gallery = await read($, gallery)
-    const parts: Elements = { Box, Text }
+    const parts: Elements = { Box, Text, Svg: e.surface !== 'terminal' && 'Svg' in table ? table.Svg : undefined }
     const design = bound?.docs.find(one => one.kind === 'design')
 
     return (
