@@ -96,7 +96,7 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission spec <feature>` | binds a Sacred Book feature by folder name or ticket (`console-comptes`, `UNL-4844`); `spec off` unbinds |
 | `/mission mission <text>` | sets the mission by hand |
 | `/mission <text>` / `auto` | pins the action line / hands it back to the model |
-| (the scene) | the cat lives in a small meadow drawn from `assets/decor/decor-sheet.png`: sun or moon by the hour, a cloud adrift, hills, grass that sways, a ladybird and a butterfly. It tells the session too: a bloom grows for each finished todo, a mushroom comes up for each failed call, dust rises at each tool call, and a speech bubble holds canned lines and one quip a turn start and a turn end, worded by haiku |
+| (the scene) | the cat lives in a small meadow drawn from `assets/decor/decor-sheet.png`: sun or moon by the hour, a cloud adrift, grass that sways, a ladybird and a butterfly. It tells the session too: a bloom grows for each finished todo, a mushroom comes up for each failed call, dust rises at each tool call, and a speech bubble holds canned lines and one quip a turn start and a turn end, worded by haiku |
 | `/mission cat roux` / `noir` / `garfield` | which cat walks the pane; remembered |
 | `/mission lasagne` | serves a steaming dish in the scene: for a minute the cat tears from end to end and leaps, under a wave of lit squares rolling across like an RGB keyboard's; `lasagne off` clears the table |
 | `/mission pet sprite` / `big` | its size: small (32 columns, 11 to 14 rows) or big (64 columns by 20 rows, three times the pixels) |

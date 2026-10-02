@@ -1484,8 +1484,7 @@ const scene = {
   saysUntil: 0,
   /** Until when, on the scene's clock, the lasagne is out and the cat beside itself. */
   feastUntil: 0,
-  /** The meadow laid for a strip this wide and a cat this size. */
-  back: [] as Prop[],
+  /** The grass laid for a strip this wide and a cat this size. */
   front: [] as Prop[],
   /** Where a bloom or a mushroom may come up, in the order they do. */
   plots: [] as number[],
@@ -1548,20 +1547,13 @@ const BLOOMS: readonly [DecorName, DecorName][] = [
 ]
 const MUSHROOMS: readonly DecorName[] = ['mushroom_a', 'mushroom_b']
 
-/** The meadow for a strip `columns` wide: what stands behind the cat, what before it, and the plots. */
+/** The meadow for a strip `columns` wide: tufts of grass before the cat, and the plots between them. */
 const layMeadow = (columns: number) => {
   const next = seeded(columns)
   const pick = <T,>(from: readonly T[]) => from[Math.floor(next() * from.length)] as T
   const cell = 16
-  const back: Prop[] = []
   const front: Prop[] = []
   const plots: number[] = []
-  // A tree and a bush behind, toward the ends; rocks where they fall.
-  if (columns > 90) back.push({ item: 'tree', x: Math.floor(columns * 0.3 + next() * 8) })
-  if (columns > 60) back.push({ item: 'bush', x: Math.floor(columns * (0.62 + next() * 0.15)) })
-  for (let x = 30 + Math.floor(next() * 20); x < columns - cell; x += 45 + Math.floor(next() * 40)) {
-    back.push({ item: pick(['rock_a', 'rock_b'] as const), x })
-  }
   // Grass in front, in tufts of every kind, and between the tufts the plots.
   for (let x = 2 + Math.floor(next() * 8); x < columns - 10; x += 9 + Math.floor(next() * 10)) {
     if (next() < 0.38) plots.push(x)
@@ -1574,7 +1566,6 @@ const layMeadow = (columns: number) => {
     plots[at] = plots[other] ?? 0
     plots[other] = held
   }
-  scene.back = back
   scene.front = front
   scene.plots = plots
   scene.laidFor = columns * 64 + catRows()
@@ -1714,7 +1705,7 @@ const stepScene = (ms: number) => {
  * The strip as Raster cells, `columns` wide and stripRows() tall. The scene is
  * composed in pixels, two a cell — the sky, the meadow behind, the cat, the grass
  * before it — then turned into half blocks, and what is written in characters
- * (the wave, the signpost, what the cat says) goes over the cells last.
+ * (the wave, what the cat says) goes over the cells last.
  */
 const spriteStrip = (columns: number, ground: string, ink: string, mood: string) => {
   if (scene.laidFor !== columns * 64 + catRows()) layMeadow(columns)
@@ -1763,8 +1754,7 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
     }
   }
 
-  // The hills, end to end, and the ground: three tiles, the same three in the same order.
-  for (let x = 0; x < columns; x += 2 * cell) stand('hills', 0, x)
+  // The ground: three tiles, the same three in the same order for a given width.
   const tiles = seeded(columns + 3)
   for (let x = 0; x < columns; x += 16) {
     const tile = DECOR.items[(['ground_a', 'ground_b', 'ground_c'] as const)[Math.floor(tiles() * 3)] ?? 'ground_a']
@@ -1776,8 +1766,7 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
     }
   }
 
-  // Behind the cat: the tree, the bush, the rocks, what grew, the dish.
-  for (const one of scene.back) stand(one.item, 0, one.x)
+  // Behind the cat: what grew, and the dish.
   // A bloom a finished todo, a mushroom a failed call, each in its plot.
   while (scene.blooms.length < Math.min(scene.done, scene.plots.length)) {
     scene.blooms.push({ x: scene.plots[scene.blooms.length] ?? 0, kind: scene.blooms.length % BLOOMS.length, born: scene.clock })
