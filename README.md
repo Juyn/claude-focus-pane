@@ -114,12 +114,14 @@ bunx --package typescript tsc -p .
 claude plugin test .
 ```
 
-The sprite cat is `assets/cat-sheet.png` (64×36 frames, described by `assets/cat-sheet.json`; the
-earlier 32×24 sheet is kept under `assets/v1-32x24/`), baked
+The sprite cat is `assets/cat-sheet.png` (32×24 frames, described by `assets/cat-sheet.json`), baked
 into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet. A 64×36 sheet
 is squeezed to 64×24 at bake time and drawn in quadrants, four pixels and two colors a cell: twice
 the detail across at the same size on screen. Sextants would keep all 36 rows, but a Raster cell
-refuses any character beyond the Basic Multilingual Plane.
+refuses any character beyond the Basic Multilingual Plane. The finer sheet is kept under
+`assets/v2-64x36/` (`python3 scripts/build-sprites.py assets/v2-64x36/cat-sheet.json` bakes it), but it is
+not the default: terminals draw quadrants with visible seams between cells, and the cat looks worse
+for it than in plain half blocks.
 
 `hooks/register.tsx` is the module, `types/index.d.ts` its state contract, `scripts/thumbs.py` the
 thumbnail shooter (cached in `~/.cache/focus-pane`). With `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` an edit
