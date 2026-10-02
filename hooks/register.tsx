@@ -1038,7 +1038,12 @@ const say = (text: string, ms = 7000) => {
   }
   if (line) lines.push(line)
   if (lines.length === 0) return
-  scene.lines = lines.slice(0, BUBBLE_LINES)
+  // Too long for the frame: it trails off rather than stop mid-sentence unmarked.
+  if (lines.length > BUBBLE_LINES) {
+    const last = (lines[BUBBLE_LINES - 1] ?? '').slice(0, BUBBLE_WIDTH - 3).replace(/[\s,;:.!?-]+$/, '')
+    lines.splice(BUBBLE_LINES - 1, lines.length, `${last}...`)
+  }
+  scene.lines = lines
   scene.saysUntil = scene.clock + ms
   scene.isDirty = true
 }
@@ -1934,14 +1939,14 @@ const keep = async ($: EngineInterface, change: (was: Board) => Board) => {
 
 const QUIP =
   "Tu es un chat de bureau qui regarde un agent de code travailler et commente, pince-sans-rire, " +
-  'comme un documentaire animalier ou une remarque de chat. Une seule phrase de 70 caractères ' +
-  'maximum, en français, sans guillemets, sans emoji, sans préambule.'
+  'comme un documentaire animalier ou une remarque de chat. Une seule phrase très courte, de ' +
+  '8 mots et 50 caractères au maximum, en français, sans guillemets, sans emoji, sans préambule.'
 
 /** Has haiku word what the cat thinks of it; detached, the turn never waits on it. */
 const quip = ($: EngineInterface, about: string) => {
   if (stage.style !== 'sprite' && stage.style !== 'fine') return
   void $.model
-    .complete({ model: 'haiku', maxTokens: 60, system: QUIP, prompt: about })
+    .complete({ model: 'haiku', maxTokens: 40, system: QUIP, prompt: about })
     .then(told => {
       const line = told.isAnswered ? told.text.trim().split('\n')[0]?.trim() : ''
       if (line) say(line, 9000)
