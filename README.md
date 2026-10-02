@@ -115,7 +115,9 @@ claude plugin test .
 ```
 
 The sprite cat is `assets/cat-sheet.png` (32×24 frames, described by `assets/cat-sheet.json`), baked
-into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet.
+into the module by `python3 scripts/build-sprites.py`: run it again after changing the sheet. A sheet of
+64×36 frames (512×252, same manifest with `frameWidth` 64 and `frameHeight` 36) is drawn in sextants,
+six pixels a cell and two colors a cell: three times the detail at the same size on screen.
 
 `hooks/register.tsx` is the module, `types/index.d.ts` its state contract, `scripts/thumbs.py` the
 thumbnail shooter (cached in `~/.cache/focus-pane`). With `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` an edit
