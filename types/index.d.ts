@@ -18,6 +18,8 @@ export type Focus = {
 }
 
 export type Todo = {
+  /** The task's id when a task tool made it; a TodoWrite row has none. */
+  id?: string
   content: string
   status: 'pending' | 'in_progress' | 'completed'
   activeForm: string

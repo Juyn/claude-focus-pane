@@ -816,7 +816,78 @@ export const register: Register = on => {
   on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
     const ran = await next(e)
     const wrote = asTodos((e as unknown as { todos?: unknown }).todos)
-    if (wrote.length > 0) await update($, todos, () => wrote)
+    if (wrote.length > 0 && !e.agentId) await update($, todos, () => wrote)
+
+    return ran
+  })
+
+  // The task tools are the todo list of newer builds: one call a task, by id.
+  on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId) return ran
+    const made = (ran as { result?: { task?: { id?: unknown; subject?: unknown } } }).result?.task
+    const id = asText(made?.id)
+    const args = e as unknown as { subject?: unknown; activeForm?: unknown }
+    const content = asText(made?.subject) || asText(args.subject)
+    if (id && content) {
+      await update($, todos, (was): Todo[] => [
+        ...was.filter(one => one.id !== id),
+        { id, content, status: 'pending', activeForm: asText(args.activeForm) || content },
+      ])
+    }
+
+    return ran
+  })
+
+  on('tool.call', { tool: 'TaskUpdate' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId) return ran
+    const told = ran as { isError?: unknown; result?: { success?: unknown } }
+    if (told.isError === true || told.result?.success === false) return ran
+    const args = e as unknown as { taskId?: unknown; subject?: unknown; activeForm?: unknown; status?: unknown }
+    const id = asText(args.taskId)
+    if (!id) return ran
+
+    await update($, todos, was =>
+      args.status === 'deleted'
+        ? was.filter(one => one.id !== id)
+        : was.map(one =>
+            one.id !== id
+              ? one
+              : {
+                  ...one,
+                  content: asText(args.subject) || one.content,
+                  activeForm: asText(args.activeForm) || asText(args.subject) || one.activeForm,
+                  status:
+                    args.status === 'pending' || args.status === 'in_progress' || args.status === 'completed'
+                      ? args.status
+                      : one.status,
+                },
+          ),
+    )
+
+    return ran
+  })
+
+  // The engine's own list is the truth: a TaskList answer replaces what the pane holds.
+  on('tool.call', { tool: 'TaskList' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId) return ran
+    const listed = (ran as { result?: { tasks?: unknown } }).result?.tasks
+    if (!Array.isArray(listed)) return ran
+
+    await update($, todos, was =>
+      listed.flatMap(one => {
+        const row = one as Record<string, unknown> | null
+        const id = asText(row?.id)
+        const content = asText(row?.subject)
+        if (!row || !id || !content) return []
+        const status: Todo['status'] =
+          row.status === 'in_progress' || row.status === 'completed' ? row.status : 'pending'
+
+        return [{ id, content, status, activeForm: was.find(old => old.id === id)?.activeForm ?? content }]
+      }),
+    )
 
     return ran
   })

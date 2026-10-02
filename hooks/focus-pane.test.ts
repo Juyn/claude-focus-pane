@@ -485,3 +485,31 @@ test('a prompt opens the pane a narrow terminal kept waiting', async ($, on) => 
 
   expect(opened).toEqual(['focus'])
 })
+
+test('the task tools fill the plan as TodoWrite does', async ($, on) => {
+  mock.clock(on, { now: 1_700_000_000_000 })
+  on('ui.render', () => ({ type: 'Text' as const, children: [] }))
+  let made = 0
+  on('tool.call', ($$, e) => {
+    if (e.tool === 'TaskCreate') {
+      made += 1
+
+      return { result: { task: { id: String(made), subject: e.subject } }, text: 'ok' }
+    }
+    if (e.tool === 'TaskUpdate') return { result: { success: true, taskId: e.taskId, updatedFields: ['status'] }, text: 'ok' }
+
+    return { isError: true as const, result: null, text: 'no tool beneath the test' }
+  })
+
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Écrire le contrat BFF', description: 'x', activeForm: 'Écriture du contrat BFF' })
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Conformer api-v2', description: 'x' })
+  await $.tool.call({ tool: 'TaskCreate', subject: 'À jeter', description: 'x' })
+  await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'in_progress' })
+  await $.tool.call({ tool: 'TaskUpdate', taskId: '3', status: 'deleted' })
+  const pane = await wide($)
+
+  expect(await pane.find({ text: /● Écriture du contrat BFF/ })).toBeDefined()
+  expect(await pane.find({ text: /○ Conformer api-v2/ })).toBeDefined()
+  expect(await pane.find({ text: /À jeter$/ })).toBeUndefined()
+  expect(await pane.find({ text: '0/2' })).toBeDefined()
+})
