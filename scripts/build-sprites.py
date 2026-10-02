@@ -11,7 +11,7 @@ size is `cat-sheet-small.png` where the cat has one drawn for it, else the big
 sheet sampled down by half. A cat with no big sheet of its own names another's
 in BORROWS.
 """
-import json, os, subprocess
+import base64, json, os, subprocess
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 cats = os.path.join(root, 'assets', 'cats')
@@ -53,7 +53,14 @@ def bake(manifest, halve=False):
             frame = ''.join(letter(k * width + x, one['row'] * height + y) for y in range(height) for x in range(width))
             clips.append(f"            '{frame}',")
         clips += ['          ],', '        },']
+    # The sheet itself, stripped of its metadata: what a surface that draws real
+    # pictures (the desktop's Svg) is handed in place of the baked pixels.
+    png = subprocess.run(
+        ['magick', os.path.join(os.path.dirname(manifest), sheet['image']), *sample, '-strip', 'png:-'],
+        capture_output=True, check=True).stdout
     return [f'      w: {width},', f'      h: {height},', f"      ink: '{LETTERS[:len(palette)]}',",
+            f"      across: {sheet['columns']},", f"      down: {sheet['rows']},",
+            f"      png: '{base64.b64encode(png).decode()}',",
             '      palette: [' + ', '.join(f'0x{c}' for c in palette) + '],', '      clips: {', *clips, '      },']
 
 

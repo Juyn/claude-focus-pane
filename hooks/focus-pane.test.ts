@@ -683,3 +683,19 @@ test('lasagne serves the dish in the scene, in cells the engine takes', async ($
   expect(served.text).toMatch(/lasagnes servies/)
   expect(strip?.type).toBe('Raster')
 })
+
+test('on the desktop the cat is one self-playing Svg', async ($, on) => {
+  engine(on)
+  const pane = await $.ui.mount({
+    plugin: 'focus-pane',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: PANE,
+    props: { ...PROPS, bodyColumns: 100 },
+  })
+  const cat = await pane.find({ type: 'Svg' })
+
+  expect(cat?.type).toBe('Svg')
+  expect(String(cat?.props.source)).toMatch(/@keyframes play/)
+  expect(await pane.find({ type: 'Raster' })).toBeUndefined()
+})

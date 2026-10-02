@@ -66,8 +66,9 @@ The desktop app starts its local Code sessions with the same `~/.claude/settings
 on the desktop machine are the whole install: the `env` block is how a folder is named where no
 `--plugin-dir` flag can be given. Quit and reopen the app (or start a new Code session) afterwards.
 For a session the desktop app runs on a **remote** host, install on that host, not on the desktop.
-On the desktop surface the mockup thumbnails are not drawn (they are terminal cells); captions and
-the open button are.
+On the desktop surface the cat is one self-playing SVG, drawn from the 64×36 sheet in real pixels; the
+meadow, the particles and the lasagne are terminal cells and are not drawn there, nor are the mockup
+thumbnails (captions and the open button are).
 
 ### One-off, without touching settings
 
