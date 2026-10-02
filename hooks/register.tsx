@@ -2169,7 +2169,7 @@ const meter = ({ Text }: Elements, tone: Tone, ratio: number, width: number, col
   const filled = Math.max(0, Math.min(width, Math.round(ratio * width)))
 
   return (
-    <Text backgroundColor={tone.card}>
+    <Text backgroundColor={tone.card} wrap="truncate-end">
       <Text color={color} backgroundColor={tone.card}>
         {'━'.repeat(filled)}
       </Text>
@@ -2199,7 +2199,7 @@ type Figure = {
 }
 
 /** One figure, large, with its meter and what it counts: the row of four. */
-const card = (parts: Elements, tone: Tone, one: Figure, width: number) => {
+const card = (parts: Elements, tone: Tone, one: Figure, width: number | string, bar: number) => {
   const { Box, Text } = parts
 
   return (
@@ -2207,7 +2207,9 @@ const card = (parts: Elements, tone: Tone, one: Figure, width: number) => {
       key={`card:${one.label}`}
       flexDirection="column"
       width={width}
-      flexShrink={0}
+      // In cells the widths add up exactly; as a share of the row, it may give.
+      flexGrow={typeof width === 'string' ? 1 : 0}
+      flexShrink={typeof width === 'string' ? 1 : 0}
       borderStyle="round"
       borderColor={tone.frame}
       backgroundColor={tone.card}
@@ -2220,7 +2222,7 @@ const card = (parts: Elements, tone: Tone, one: Figure, width: number) => {
       {one.ratio === null ? (
         <Text backgroundColor={tone.card}> </Text>
       ) : (
-        meter(parts, tone, one.ratio, Math.max(4, width - 4), one.color)
+        meter(parts, tone, one.ratio, bar, one.color)
       )}
       <Text {...quiet(tone, tone.card)} wrap="truncate-end">
         {one.caption}
@@ -3150,13 +3152,20 @@ export const register: Register = on => {
     const isWide = room >= 84
     const perRow = isWide ? 4 : 2
     const cardWidth = Math.floor((room - (perRow - 1)) / perRow)
+    // Off the terminal a width is no count of cells, and the font is not a grid:
+    // the blocks there take a share of their row and flex, instead of a number.
+    const isCells = e.surface === 'terminal'
+    const cardShare = `${Math.floor(100 / perRow) - 2}%`
+    const halfShare = isWide ? '49%' : '100%'
     const cards = (
       <Box flexDirection="column" width="100%">
         {[0, perRow]
           .filter(from => from < figures.length)
           .map(from => (
             <Box flexDirection="row" width="100%" columnGap={1}>
-              {figures.slice(from, from + perRow).map(one => card(parts, tone, one, cardWidth))}
+              {figures.slice(from, from + perRow).map(one =>
+                card(parts, tone, one, isCells ? cardWidth : cardShare, isCells ? Math.max(4, cardWidth - 4) : 14),
+              )}
             </Box>
           ))}
       </Box>
@@ -3322,7 +3331,8 @@ export const register: Register = on => {
       <Box
         key={`doc:${one.kind}`}
         flexDirection="column"
-        width={paperWidth}
+        width={isCells ? paperWidth : paperWidth === room ? '100%' : '49%'}
+        flexGrow={isCells ? 0 : 1}
         flexShrink={0}
         borderStyle="round"
         borderColor={tone.frame}
@@ -3473,9 +3483,10 @@ export const register: Register = on => {
       <Box
         key="notes"
         flexDirection="column"
-        width={half}
+        width={isCells ? half : halfShare}
         minHeight={blockRows}
-        flexShrink={0}
+        flexGrow={isCells ? 0 : 1}
+        flexShrink={isCells ? 0 : 1}
         borderStyle="round"
         borderColor={tone.frame}
         backgroundColor={tone.card}
@@ -3511,9 +3522,10 @@ export const register: Register = on => {
       <Box
         key="chores"
         flexDirection="column"
-        width={half}
+        width={isCells ? half : halfShare}
         minHeight={blockRows}
-        flexShrink={0}
+        flexGrow={isCells ? 0 : 1}
+        flexShrink={isCells ? 0 : 1}
         borderStyle="round"
         borderColor={tone.frame}
         backgroundColor={tone.card}
