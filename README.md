@@ -98,7 +98,7 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission mission <text>` | sets the mission by hand |
 | `/mission <text>` / `auto` | pins the action line / hands it back to the model |
 | (the scene) | the cat lives in a small meadow drawn from `assets/decor/decor-sheet.png`: sun or moon by the hour, a cloud adrift, grass that sways, a ladybird and a butterfly. It tells the session too: a bloom grows for each finished todo, a mushroom comes up for each failed call, dust rises at each tool call, and a speech bubble holds canned lines and one quip a turn start and a turn end, worded by haiku |
-| `/mission cat roux` / `noir` / `garfield` | which cat walks the pane; remembered |
+| `/mission cat roux` / `noir` / `garfield` / `panda` | which animal walks the pane; remembered |
 | `/mission lasagne` | serves a steaming dish in the scene: for a minute the cat tears from end to end and leaps, under a wave of lit squares rolling across like an RGB keyboard's; `lasagne off` clears the table |
 | `/mission pet sprite` / `big` | its size: small (32 columns, 11 to 14 rows) or big (64 columns by 20 rows, three times the pixels) |
 | `/mission pet png` | the cat as a real image (64×36 frames from `assets/frames/`, 9 rows), where the terminal draws pictures (kitty graphics protocol); elsewhere it says so and falls back to `sprite`. `python3 scripts/build-frames.py` cuts the frames |
@@ -126,7 +126,8 @@ The cats live under `assets/cats/<name>/`: `cat-sheet.png` is the 64×36 sheet d
 each has its JSON manifest beside it. The decor is `assets/decor/decor-sheet.png`, 16×16 cases, its
 elements named in `decor-sheet.json`. `python3 scripts/build-sprites.py` bakes them all into the
 module: run it again after changing or adding a sheet (a new cat is a folder, a name in the script's
-`ORDER`, and a value of `PetCoat`). Both sizes are drawn in half blocks, one pixel a half cell: a
+`ORDER`, and a value of `PetCoat`). The panda's sheet is not a drawing but a program:
+`python3 scripts/draw-panda.py` builds every frame from a few shapes and writes the sheet. Both sizes are drawn in half blocks, one pixel a half cell: a
 Raster cell takes no character beyond the Basic Multilingual Plane, which rules sextants out, and a
 quadrant's pixel is twice as tall as wide, which squeezes a square sheet.
 

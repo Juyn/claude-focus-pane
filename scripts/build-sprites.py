@@ -17,7 +17,7 @@ import base64, json, os, subprocess
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 cats = os.path.join(root, 'assets', 'cats')
 LETTERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-ORDER = ['roux', 'noir', 'garfield']
+ORDER = ['roux', 'noir', 'garfield', 'panda']
 # garfield is the first 64x36 orange sheet; small, it is the roux cat's own.
 BORROWS = {('garfield', 'small'): os.path.join(cats, 'roux', 'cat-sheet-small.json')}
 

@@ -710,3 +710,13 @@ test('on the desktop the cat and its meadow are one self-playing Svg', async ($,
   expect(sources.filter(one => /viewBox="0 0 100 3"/.test(one))).toHaveLength(2)
   expect(await pane.find({ type: 'Raster' })).toBeUndefined()
 })
+
+test('cat panda walks the panda, drawn from nothing by scripts/draw-panda.py', async ($, on) => {
+  await start($, on)
+  const told = await $.command.run({ command: 'mission', args: 'cat panda', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await petCommand($, 'big')
+  const strip = await (await mounted($, 100)).find({ key: 'pet' })
+
+  expect(told.text).toMatch(/le panda entre en scène/)
+  expect(strip?.props.rows).toBe(20)
+})
