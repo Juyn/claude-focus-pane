@@ -4663,6 +4663,8 @@ export const register: Register = on => {
     )
 
     const footer = legend(parts, tone, [
+      // Seated above the prompt, not docked: only the fullscreen renderer docks a pane, and the person alone switches to it.
+      ...(e.props.placement === 'inline' && e.surface === 'terminal' ? ([['/tui fullscreen', 'Pane à droite']] as const) : []),
       ['a', 'Tâche'],
       ['t', 'Lien'],
       ['c', 'Commenter'],

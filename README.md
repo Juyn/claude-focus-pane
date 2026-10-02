@@ -11,7 +11,9 @@ A Claude Code mod: a permanent side pane that keeps the session's context on scr
 - **Comments / My todo** — typed in the pane, kept per working directory across sessions.
 - **Mockups tab** — one thumbnail per screen of the bound mockup, with an open-in-browser button.
 
-It opens by itself at session start. Opened unasked, the engine seats a pane only from 144 terminal
+It docks to the right of the transcript only under Claude Code's fullscreen renderer (`/tui fullscreen`,
+from 110 columns); under the classic renderer the engine seats it above the prompt, and a mod cannot
+change that. It opens by itself at session start. Opened unasked, the engine seats a pane only from 144 terminal
 columns; in a narrower terminal, run the slash command once (`/mission`).
 
 ## Install — instructions for an agent

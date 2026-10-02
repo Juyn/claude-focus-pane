@@ -358,7 +358,7 @@ test('the pane names the command it was actually granted', async ($, on) => {
 
   const pane = await wide($)
   expect(await pane.find({ text: '  /mission' })).toBeDefined()
-  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^a Tâche  t Lien  c Commenter  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
+  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite  a Tâche  t Lien  c Commenter  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
 })
 
 test('a reload registers the remembered command again', async ($, on) => {
@@ -728,4 +728,20 @@ test('cat panda opens the panda its own world, and plants bamboo in it', async (
   expect(planted.text).toMatch(/pousse de bambou/)
   await pane.unmount()
   expect((await (await mounted($, 100)).find({ key: 'pet' }))?.type).toBe('Raster')
+})
+
+test('docked, the legend has no hint about the fullscreen renderer', async ($, on) => {
+  engine(on)
+  const docked = await $.ui.mount({
+    plugin: 'focus-pane',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: PANE,
+    props: { ...PROPS, bodyColumns: 70, placement: 'dock' as const },
+  })
+
+  expect((await docked.find({ key: 'legend' }))?.text).not.toMatch(/tui fullscreen/)
+  await docked.unmount()
+  // Seated above the prompt, it says how to get the pane to the right.
+  expect((await (await wide($)).find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite/)
 })
