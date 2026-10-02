@@ -7,11 +7,11 @@ Each `figure.stage` of the file is one screen: its `.vp` is shot alone, at its
 own `data-w` width, by a headless browser, then scaled to <pixel-rows> pixels
 tall. A file with no such figure is shot once, from its top. Prints a JSON list
 of `{id, title, columns, rows, cells}`; `cells` is base64 of three little-endian
-uint32 a cell: the upper half block, the top pixel, the bottom pixel.
+uint32 a cell: the lower half block, the bottom pixel, the top pixel.
 """
 import base64, concurrent.futures, hashlib, html, json, os, re, shutil, struct, subprocess, sys, tempfile
 
-UPPER_HALF = 0x2580
+LOWER_HALF = 0x2584  # the foreground paints the bottom half: see LOWER_HALF in register.tsx
 BROWSERS = ('brave', 'chromium', 'google-chrome-stable', 'google-chrome', 'chrome')
 ISOLATE = """<script>(function(){var m=location.hash.match(/shot=(\\d+)/);if(!m)return;
 var vp=document.querySelectorAll('figure.stage .vp')[+m[1]];if(!vp)return;
@@ -54,14 +54,14 @@ def cells(png, columns, pixel_rows):
     out = bytearray()
     for row in range(pixel_rows // 2):
         for x in range(columns):
-            out += struct.pack('<III', UPPER_HALF, px(x, row * 2), px(x, row * 2 + 1))
+            out += struct.pack('<III', LOWER_HALF, px(x, row * 2 + 1), px(x, row * 2))
     return base64.b64encode(bytes(out)).decode()
 
 
 def main():
     source, pixel_rows = sys.argv[1], int(sys.argv[2]) // 2 * 2
     stat = os.stat(source)
-    stamp = hashlib.sha1(f'{source}:{stat.st_mtime_ns}:{stat.st_size}:{pixel_rows}:2'.encode()).hexdigest()[:16]
+    stamp = hashlib.sha1(f'{source}:{stat.st_mtime_ns}:{stat.st_size}:{pixel_rows}:3'.encode()).hexdigest()[:16]
     cache = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'focus-pane')
     kept = os.path.join(cache, f'{stamp}.json')
     if os.path.exists(kept):

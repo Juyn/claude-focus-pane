@@ -463,9 +463,9 @@ const cat3Strip = (columns: number, ground: string, ink: string, mood: string) =
   for (let row = 0; row < CAT3_ROWS; row += 1) {
     for (let x = 0; x < columns; x += 1) {
       const cell = (row * columns + x) * 3
-      words[cell] = UPPER_HALF
-      words[cell + 1] = at(row * 2, x)
-      words[cell + 2] = at(row * 2 + 1, x)
+      words[cell] = LOWER_HALF
+      words[cell + 1] = at(row * 2 + 1, x)
+      words[cell + 2] = at(row * 2, x)
     }
   }
   if (mood) {
@@ -842,9 +842,9 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
     for (let x = 0; x < columns; x += 1) {
       const cell = (row * columns + x) * 3
       if (!IS_FINE) {
-        words[cell] = UPPER_HALF
-        words[cell + 1] = at(row * 2, x)
-        words[cell + 2] = at(row * 2 + 1, x)
+        words[cell] = LOWER_HALF
+        words[cell + 1] = at(row * 2 + 1, x)
+        words[cell + 2] = at(row * 2, x)
         continue
       }
       // Four pixels, two colors: the commonest is the ground of the cell, the
@@ -914,7 +914,13 @@ const toBase64 = (bytes: Uint8Array) => {
   return out
 }
 
-const UPPER_HALF = 0x2580 // ▀: the foreground paints the top half, the background the bottom
+/**
+ * ▄: the foreground paints the bottom half, the background the rest of the cell.
+ * Not ▀: xterm.js draws a half block a pixel short of the cell's top edge, and
+ * that row shows the background — with ▀ it is the bottom color, a hairline
+ * over every cell whose halves differ. With ▄ the row is already the top color.
+ */
+const LOWER_HALF = 0x2584
 const rgb = (hex: string) => Number.parseInt(hex.slice(1), 16)
 
 /**
@@ -940,9 +946,9 @@ const petStrip = (columns: number, ground: string, ink: string, mood: string) =>
   for (let row = 0; row < PET_ROWS; row += 1) {
     for (let x = 0; x < columns; x += 1) {
       const cell = (row * columns + x) * 3
-      words[cell] = UPPER_HALF
-      words[cell + 1] = rgb(at(row * 2, x) ?? ground)
-      words[cell + 2] = rgb(at(row * 2 + 1, x) ?? ground)
+      words[cell] = LOWER_HALF
+      words[cell + 1] = rgb(at(row * 2 + 1, x) ?? ground)
+      words[cell + 2] = rgb(at(row * 2, x) ?? ground)
     }
   }
   // What it feels, one character past its head, on the top row.
@@ -1494,6 +1500,79 @@ const demoTodos = (bound: Feature | null): Todo[] => {
   }))
 }
 
+/** A feature made up whole, for a session bound to none. */
+const DEMO_FEATURE: Feature = {
+  path: 'v2/banking/console-comptes',
+  title: 'Console admin — comptes',
+  ticket: 'UNL-4844',
+  docs: [
+    {
+      kind: 'spec',
+      name: 'spec.md',
+      path: 'v2/banking/console-comptes/spec.md',
+      status: 'approved',
+      title: 'Console admin — comptes',
+      outline: ['Ce qui est livré', 'Règles métier', '  Solde et encours', '  Relevé', 'Hors périmètre'],
+    },
+    {
+      kind: 'plan',
+      name: 'plan.md',
+      path: 'v2/banking/console-comptes/plan.md',
+      status: 'in progress',
+      title: 'Plan — console comptes',
+      outline: [
+        'Contrat BFF',
+        '  R1 — GET /accounts',
+        '  R2 — GET /accounts/{id}',
+        '  R3 — relevé',
+        '  R4 — attestation',
+        'api-v2 — en dernier, conforme',
+        'Front — apps/admin',
+        'Pact',
+        'Recette (staging)',
+      ],
+    },
+    {
+      kind: 'design',
+      name: 'maquettes.html',
+      path: 'v2/banking/console-comptes/design/maquettes.html',
+      status: null,
+      title: null,
+      outline: [],
+    },
+  ],
+}
+
+/** A feed of calls a real turn could have made, the newest still running. */
+const demoFeed = (now: number): FeedRow[] =>
+  (
+    [
+      ['Bash', 'make spec-guard', 4, null, false],
+      ['Edit', 'apps/admin/src/accounts/StatementTable.tsx', 21, 180, false],
+      ['Bash', 'bun run test accounts', 48, 12400, true],
+      ['Edit', 'packages/sdk-backoffice/src/accounts.ts', 75, 210, false],
+      ['Read', 'src/BackOffice/Accounts/StatementDto.php', 96, 40, false],
+      ['Grep', 'AccountStatement', 110, 320, false],
+      ['Bash', 'make sdk-gen', 152, 8700, false],
+      ['Agent', 'Conformer api-v2 au contrat R3', 240, 96000, false],
+      ['Read', 'v2/banking/console-comptes/plan.md', 305, 35, false],
+    ] as const
+  ).map(([tool, detail, ago, ms, isError], at) => ({ id: `demo-${at}`, tool, detail, at: now - ago * 1000, ms, isError }))
+
+/** Notes and chores for a pane nobody wrote in yet. */
+const demoBoard = (now: number): Board => ({
+  notes: [
+    { id: 1, text: 'Le relevé doit paginer côté serveur, pas dans le front', at: now - 40 * 60_000 },
+    { id: 2, text: 'Attestation : attendre la réponse du métier sur le gabarit', at: now - 12 * 60_000 },
+  ],
+  chores: [
+    { id: 3, text: 'Relire la PR BFF', isDone: true, href: null },
+    { id: 4, text: 'Recette staging avec un compte centralisateur', isDone: false, href: null },
+    { id: 5, text: 'Ticket UNL-4844', isDone: false, href: 'https://linear.app/unlocker/issue/UNL-4844' },
+  ],
+  serial: 5,
+})
+
 /** The person's notes are kept per working directory, across sessions. */
 const shelf = async ($: EngineInterface) => `board:${await $.session.cwd()}`
 
@@ -1646,10 +1725,25 @@ export const register: Register = on => {
     }
 
     if (args === 'demo') {
+      // A session bound to nothing gets a feature to show; a bound one keeps its own.
+      if ((await read($, feature)) === null) await update($, feature, () => DEMO_FEATURE)
       const fake = demoTodos(await read($, feature))
       await update($, todos, () => fake)
+      const now = await $.clock.now()
+      await update($, feed, () => demoFeed(now))
+      await update($, focus, was => ({
+        ...was,
+        isDismissed: false,
+        ticket: was.ticket ?? DEMO_FEATURE.ticket,
+        mission: was.mission ?? 'Livrer la console admin des comptes : liste, détail, relevé et attestation',
+        isMissionPhrased: true,
+        summary: was.summary ?? 'Brancher le relevé de compte sur le SDK back-office',
+        isPinned: true,
+      }))
+      // Shown, never stored: the person's own notes are left as they are on disk.
+      await update($, board, was => (was.notes.length + was.chores.length > 0 ? was : demoBoard(now)))
 
-      return { text: `Focus pane: todo list de démonstration (${fake.length} étapes).` }
+      return { text: `Focus pane: données de démonstration (${fake.length} étapes).` }
     }
 
     const isMission = args.startsWith('mission ')
