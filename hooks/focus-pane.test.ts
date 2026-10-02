@@ -569,3 +569,34 @@ test('the feed names an MCP call by its server and tool, a shell call by its pur
   expect(await pane.find({ text: /linear-unlocker › save_issue/ })).toBeDefined()
   expect(await pane.find({ text: /Simuler le script SQL/ })).toBeDefined()
 })
+
+test('the cat walks a strip as wide as the pane, and stays in under an ansi theme', async ($, on) => {
+  engine(on)
+  const pane = await mounted($, 100)
+  const strip = await pane.find({ key: 'pet' })
+
+  expect(strip?.props.columns).toBe(98)
+  expect(strip?.props.rows).toBe(3)
+  await pane.unmount()
+
+  await wear($, 'dark-ansi')
+  expect(await (await mounted($, 100)).find({ key: 'pet' })).toBeUndefined()
+})
+
+test('pet off sends the cat in', async ($, on) => {
+  engine(on)
+  on('command.list', () => ({ value: [] }))
+  on('command.register', ($$, e) => ({ value: { command: e.name } }))
+  on('session.start', ($$, e) => ({ cwd: e.cwd }))
+  on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
+  on('store.set', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('process.run', () => ({
+    value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
+  await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'mission', args: 'pet off', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+
+  expect(await (await mounted($, 100)).find({ key: 'pet' })).toBeUndefined()
+})

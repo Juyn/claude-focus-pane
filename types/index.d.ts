@@ -108,6 +108,8 @@ declare module 'claude-code' {
       board: Board
       feature: Feature | null
       gallery: Gallery
+      /** False once the person sent the cat in with `pet off`. */
+      hasPet: boolean
       turn: TurnState
       skin: Skin
       /** The slash command the engine actually granted, or null while it has none. */

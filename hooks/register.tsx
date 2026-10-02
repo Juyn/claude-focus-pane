@@ -59,6 +59,7 @@ const turn = atom({ plugin: 'focus-pane', key: 'turn' } as const, {
 const board = atom({ plugin: 'focus-pane', key: 'board' } as const, { notes: [], chores: [], serial: 0 })
 const feature = atom({ plugin: 'focus-pane', key: 'feature' } as const, null)
 const gallery = atom({ plugin: 'focus-pane', key: 'gallery' } as const, { status: 'idle', path: null, shots: [] })
+const hasPet = atom({ plugin: 'focus-pane', key: 'hasPet' } as const, true)
 const skin = atom({ plugin: 'focus-pane', key: 'skin' } as const, 'dark')
 const command = atom({ plugin: 'focus-pane', key: 'command' } as const, null)
 
@@ -109,8 +110,141 @@ const DESK_SHARE = 0.3
 /** Numbers the feed rows: a module value, a reload only needs them unique from then on. */
 let sequence = 0
 
-/** The elapsed-time ticker: a module value, so a reload drops it with its timer. */
+/** The redraw ticker: a module value, so a reload drops it with its timer. */
 let ticker: Timer | undefined
+
+// ------------------------------------------------------------------- the pet
+
+/**
+ * The cat that walks the bottom of the pane: 14 by 6 pixels facing right, two a
+ * terminal row. `b` fur, `d` stripe, `e` eye, `w` bib, `.` nothing.
+ */
+const SPRITE = {
+  walk: [
+    ['t.........b.b.', 't.........bbb.', '.t.bbbbbbbbeb.', '.tbbdbdbbbbbb.', '..bbbbbbbww...', '..b.b...b.b...'],
+    ['..........b.b.', 'tt........bbb.', '..tbbbbbbbbeb.', '..bbdbdbbbbbb.', '..bbbbbbbww...', '...b.b.b.b....'],
+  ],
+  sleep: [
+    '..............',
+    '..............',
+    '..............',
+    '...bbbbbb.b.b.',
+    '.tbbdbdbbbbbb.',
+    'ttbbbbbbbbbbb.',
+  ],
+} as const
+const CAT_COLUMNS = 14
+const PET_ROWS = 3
+const FUR: Record<string, string> = { b: '#e9a45b', t: '#e9a45b', d: '#b9722f', e: '#10141f', w: '#f7ecdc' }
+
+/** Its pace: a step every tick, slow at rest, quick in a turn; then it sleeps. */
+const PET_REST_MS = 1500
+const PET_WORK_MS = 500
+const PET_SLEEPS_AFTER = 200
+
+/**
+ * Where it is and how it feels: module values, since nothing but the drawing
+ * reads them and a reload may well start it over from the left.
+ */
+const pet = { x: 0, heading: 1 as 1 | -1, step: 0, restTicks: 0, isAsleep: false, mood: '', moodTicks: 0 }
+
+/** A passing feeling, shown beside its head for a few ticks: `!`, `♪`. */
+const feel = (mood: string) => {
+  pet.mood = mood
+  pet.moodTicks = 4
+  pet.isAsleep = false
+}
+
+/** One tick of the walk: `reach` is how far a step goes. The drawing bounds `x`. */
+const walk = (reach: number) => {
+  pet.step += 1
+  pet.x += pet.heading * reach
+  if (pet.moodTicks > 0) pet.moodTicks -= 1
+}
+
+/** Starts the ticker at a turn's pace or at rest's; at rest it ends in sleep. */
+const pace = ($: EngineInterface, isWorking: boolean) => {
+  ticker?.cancel()
+  pet.restTicks = 0
+  pet.isAsleep = false
+  ticker = $.clock.every(isWorking ? PET_WORK_MS : PET_REST_MS, () => {
+    if (!isWorking) {
+      pet.restTicks += 1
+      if (pet.restTicks > PET_SLEEPS_AFTER) {
+        // Asleep it stands still: no more ticks, no more redraws.
+        pet.isAsleep = true
+        ticker?.cancel()
+        ticker = undefined
+      }
+    }
+    if (!pet.isAsleep) walk(isWorking ? 2 : 1)
+    $.ui.invalidate('ui.render')
+  })
+}
+
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+const sextet = (word: number, shift: number) => ALPHABET[(word >> shift) & 63] ?? ''
+
+/** Standard padded base64; the environment has no Buffer and no atob. */
+const toBase64 = (bytes: Uint8Array) => {
+  let out = ''
+  for (let at = 0; at < bytes.length; at += 3) {
+    const one = bytes[at] ?? 0
+    const two = bytes[at + 1]
+    const three = bytes[at + 2]
+    const word = (one << 16) | ((two ?? 0) << 8) | (three ?? 0)
+    out += sextet(word, 18)
+    out += sextet(word, 12)
+    out += two === undefined ? '=' : sextet(word, 6)
+    out += three === undefined ? '=' : sextet(word, 0)
+  }
+
+  return out
+}
+
+const UPPER_HALF = 0x2580 // ▀: the foreground paints the top half, the background the bottom
+const rgb = (hex: string) => Number.parseInt(hex.slice(1), 16)
+
+/**
+ * The strip the cat walks, as Raster cells: `columns` wide, PET_ROWS tall. Its
+ * place is folded into the strip here, so a resize never leaves it outside.
+ */
+const petStrip = (columns: number, ground: string, ink: string, mood: string) => {
+  const span = Math.max(1, columns - CAT_COLUMNS - 2)
+  // A triangle wave over the span: x walks out and back whatever it has counted to.
+  const lap = ((pet.x % (span * 2)) + span * 2) % (span * 2)
+  const left = lap < span ? lap : span * 2 - lap
+  const isRightward = lap < span === pet.heading > 0
+  const frame = pet.isAsleep ? SPRITE.sleep : (SPRITE.walk[pet.step % 2] ?? SPRITE.walk[0])
+  const at = (row: number, x: number) => {
+    const inFrame = x - left
+    if (inFrame < 0 || inFrame >= CAT_COLUMNS) return undefined
+
+    return FUR[frame[row]?.[isRightward ? inFrame : CAT_COLUMNS - 1 - inFrame] ?? '.']
+  }
+
+  const base = rgb(ground)
+  const words = new Uint32Array(columns * PET_ROWS * 3)
+  for (let row = 0; row < PET_ROWS; row += 1) {
+    for (let x = 0; x < columns; x += 1) {
+      const cell = (row * columns + x) * 3
+      words[cell] = UPPER_HALF
+      words[cell + 1] = rgb(at(row * 2, x) ?? ground)
+      words[cell + 2] = rgb(at(row * 2 + 1, x) ?? ground)
+    }
+  }
+  // What it feels, one character past its head, on the top row.
+  if (mood) {
+    const beside = isRightward ? left + CAT_COLUMNS : left - 1
+    if (beside >= 0 && beside < columns) {
+      words[beside * 3] = mood.codePointAt(0) ?? 0x20
+      words[beside * 3 + 1] = rgb(ink)
+      words[beside * 3 + 2] = base
+    }
+  }
+
+  return toBase64(new Uint8Array(words.buffer))
+}
 
 const cut = (text: string, room: number) =>
   text.length <= room ? text : `${text.slice(0, Math.max(1, room - 1))}…`
@@ -317,7 +451,7 @@ const skinOf = (value: unknown): Skin => {
  */
 const COMMAND = {
   description: 'Rouvre et cadre le pane Unlocker',
-  argumentHint: 'auto | mission <texte> | spec <feature|off> | demo | UNL-1234 <texte>',
+  argumentHint: 'auto | mission <texte> | spec <feature|off> | pet <on|off> | demo | UNL-1234 <texte>',
 }
 
 const claimCommand = async ($: EngineInterface, isFreshLoad = false) => {
@@ -716,6 +850,8 @@ export const register: Register = on => {
 
     await wearTheme($).catch(() => undefined)
     await meterUsage($).catch(() => undefined)
+    if ((await $.store.get('pet').catch(() => null)) === false) await update($, hasPet, () => false)
+    pace($, false)
 
     const saved = await shelf($)
       .then(key => $.store.get(key))
@@ -777,6 +913,14 @@ export const register: Register = on => {
           ? `Focus pane lié à ${bound.path} (${bound.docs.map(one => one.kind).join(', ')}).`
           : `Aucune feature Sacred Book ne répond à « ${asked} ».`,
       }
+    }
+
+    if (args === 'pet' || args.startsWith('pet ')) {
+      const isOn = args.slice('pet'.length).trim() !== 'off'
+      await update($, hasPet, () => isOn)
+      await $.store.set('pet', isOn).catch(() => undefined)
+
+      return { text: isOn ? 'Focus pane: le chat est de retour.' : 'Focus pane: le chat est rentré.' }
     }
 
     if (args === 'demo') {
@@ -849,8 +993,7 @@ export const register: Register = on => {
       if (!up.some(one => one.id === PANE)) void $.ui.open({ id: PANE, title: 'Focus' })
     }
 
-    ticker?.cancel()
-    ticker = $.clock.every(1000, () => $.ui.invalidate('ui.render'))
+    pace($, true)
 
     return next(e)
   })
@@ -874,6 +1017,7 @@ export const register: Register = on => {
     }
 
     const close = async (isError: boolean) => {
+      if (isError) feel('!')
       const ms = (await $.clock.now()) - at
       await update($, feed, was => was.map(one => (one.id === id ? { ...one, ms, isError } : one)))
       await meterUsage($).catch(() => undefined)
@@ -894,7 +1038,11 @@ export const register: Register = on => {
   on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
     const ran = await next(e)
     const wrote = asTodos((e as unknown as { todos?: unknown }).todos)
-    if (wrote.length > 0 && !e.agentId) await update($, todos, () => wrote)
+    if (wrote.length > 0 && !e.agentId) {
+      const before = (await read($, todos)).filter(one => one.status === 'completed').length
+      if (wrote.filter(one => one.status === 'completed').length > before) feel('♪')
+      await update($, todos, () => wrote)
+    }
 
     return ran
   })
@@ -925,6 +1073,7 @@ export const register: Register = on => {
     const args = e as unknown as { taskId?: unknown; subject?: unknown; activeForm?: unknown; status?: unknown }
     const id = asText(args.taskId)
     if (!id) return ran
+    if (args.status === 'completed') feel('♪')
 
     await update($, todos, was =>
       args.status === 'deleted'
@@ -974,8 +1123,7 @@ export const register: Register = on => {
     const ran = await next(e)
     if (e.agentId) return ran
 
-    ticker?.cancel()
-    ticker = undefined
+    pace($, false)
     await update($, turn, was => ({
       count: was.count + 1,
       isRunning: false,
@@ -1275,6 +1423,11 @@ export const register: Register = on => {
     const briefLines = (said: string | null) =>
       Math.min(BRIEF_LINES, Math.max(1, Math.ceil((said ?? '').length / briefWidth)))
 
+    // The cat is a Raster on a painted ground: without either, it stays in.
+    const Raster = 'Raster' in table ? table.Raster : undefined
+    const walks = (await read($, hasPet)) && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined
+    const petRows = walks ? PET_ROWS : 0
+
     const rowsOf = (outlines: number, todosKept: number, share: number) => {
       const paperRows = (one: Doc) =>
         Math.min(one.outline.length, outlines) + (one.outline.length > outlines ? 1 : 0) + 4
@@ -1299,6 +1452,7 @@ export const register: Register = on => {
         list +
         3 + // the feed's frame and heading
         desk +
+        petRows +
         1 // legend
       )
     }
@@ -1649,6 +1803,25 @@ export const register: Register = on => {
         {todoList}
         {activity}
         {desk}
+        {walks && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
+          <Raster
+            key="pet"
+            columns={room}
+            rows={PET_ROWS}
+            cells={petStrip(
+              room,
+              tone.panel,
+              tone.text,
+              pet.isAsleep
+                ? 'z'
+                : pet.moodTicks > 0
+                  ? pet.mood
+                  : spent.percent !== null && spent.percent >= 80
+                    ? "'"
+                    : '',
+            )}
+          />
+        )}
         {footer}
       </Box>
     )
