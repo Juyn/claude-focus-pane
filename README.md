@@ -95,6 +95,7 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission spec <feature>` | binds a Sacred Book feature by folder name or ticket (`console-comptes`, `UNL-4844`); `spec off` unbinds |
 | `/mission mission <text>` | sets the mission by hand |
 | `/mission <text>` / `auto` | pins the action line / hands it back to the model |
+| (the scene) | the sprite cat lives in a small meadow: grass, blooms, a bug ambling by, dust raised by each tool call, sparks on a finished todo, and a speech bubble — canned lines for events, and one quip a turn start and a turn end, worded by haiku |
 | `/mission pet png` | the cat as a real image (64×36 frames from `assets/frames/`, 9 rows), where the terminal draws pictures (kitty graphics protocol); elsewhere it says so and falls back to `sprite`. `python3 scripts/build-frames.py` cuts the frames |
 | `/mission pet sprite` / `3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: the sprite sheet (12 rows, default), ray-marched 3D (10 rows), line art (9 rows), flat pixels (3 rows), or sent in |
 | `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity, notes — to see it full; the notes are shown, never stored |

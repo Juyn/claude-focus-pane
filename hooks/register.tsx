@@ -151,6 +151,13 @@ const pet = { x: 0, heading: 1 as 1 | -1, step: 0, restTicks: 0, isAsleep: false
 /** A passing feeling, shown beside its head for a few ticks: `!`, `♪`. */
 const feel = (mood: string) => {
   actor.react = mood === '!' ? 'alert' : 'happy'
+  if (mood === '!') {
+    burst(7, 'x', SCENE.hurt, 0.5)
+    say('Aïe.', 2500)
+  } else {
+    burst(8, '*', SCENE.spark, 0.6)
+    say('Une de moins !', 3000)
+  }
   pet.mood = mood
   pet.moodTicks = 4
   pet.isAsleep = false
@@ -515,13 +522,16 @@ const animate = ($: EngineInterface, isWorking: boolean) => {
       return
     }
     if (stage.style === 'sprite') {
-      if (!stepSprite(SPRITE_TICK_MS, isWorking, stage.columns)) return
+      // Two clocks, one frame: the cat's and the scene's. Either moving redraws.
+      const hasStepped = stepSprite(SPRITE_TICK_MS, isWorking, stage.columns)
+      const hasStirred = stepScene(SPRITE_TICK_MS)
+      if (!hasStepped && !hasStirred) return
       void $.ui
         .blit({
           requestId: PANE,
           key: 'pet',
           columns: stage.columns,
-          rows: SPRITE_ROWS,
+          rows: STRIP_ROWS,
           cells: spriteStrip(stage.columns, stage.ground, stage.ink, stage.mood === "'" ? "'" : ''),
         })
         .catch(() => undefined)
@@ -673,6 +683,7 @@ const ASKING: readonly string[] = ['AskUserQuestion', 'ExitPlanMode']
 /** Puts the cat on guard, or stands it down, the moment the wait starts or ends. */
 const await_ = (isAwaited: boolean) => {
   if (actor.isAwaited !== isAwaited) actor.isCalled = true
+  if (isAwaited && !actor.isAwaited) say('Hé. On attend ta réponse.', 9000)
   actor.isAwaited = isAwaited
 }
 
@@ -822,73 +833,298 @@ const stepSprite = (ms: number, isWorking: boolean, columns: number) => {
   return hasMoved
 }
 
-/** The strip the sprite cat lives on, as Raster cells: `columns` wide, SPRITE_ROWS tall. */
+// ------------------------------------------------------------------ the scene
+
+/** The cat's rows, then one for the ground it stands on. */
+const STRIP_ROWS = SPRITE_ROWS + 1
+
+/** What the scene is painted with, beside the cat's own palette. */
+const SCENE = {
+  ground: 0x8a7a1f,
+  grass: [0x5f8a3a, 0x7fa64a, 0x4d7330],
+  bloom: [0xe86a8a, 0xf2c14e, 0xe8e2f7],
+  mote: 0x4a5573,
+  bug: 0x9bd45a,
+  ember: [0xf2a45b, 0xe2843a, 0xb9622a],
+  spark: [0xf7e27a, 0xfff3c0],
+  hurt: [0xff6b7a, 0xc8283a],
+}
+
+/** One thing adrift over the scene: a square of dust, a spark, a cross. */
+type Speck = { x: number; y: number; dx: number; dy: number; age: number; life: number; glyph: number; colors: readonly number[] }
+
+/** A glyph standing in the scene: a blade of grass, a bloom, a mote. */
+type Prop = { x: number; row: number; glyph: number; color: number }
+
+/** The scene around the cat: module values, as the cat's own are. */
+const scene = {
+  clock: 0,
+  specks: [] as Speck[],
+  /** What the cat says, wrapped, and until when on the scene's clock. */
+  lines: [] as string[],
+  saysUntil: 0,
+  bugX: 0,
+  /** The props laid for a strip this wide, and that width. */
+  props: [] as Prop[],
+  laidFor: 0,
+  isDirty: false,
+}
+
+const glyphOf = (text: string) => text.codePointAt(0) ?? 0x20
+
+/** A small repeatable generator: the same strip width grows the same meadow. */
+const seeded = (seed: number) => {
+  let state = (seed * 2654435761) >>> 0
+
+  return () => {
+    state = (Math.imul(state ^ (state >>> 15), 2246822507) + 0x9e3779b9) >>> 0
+
+    return state / 4294967296
+  }
+}
+
+/** Grass in tufts, a bloom on its stem now and then, motes in the air. */
+const layProps = (columns: number) => {
+  const next = seeded(columns)
+  const pick = <T,>(from: readonly T[]) => from[Math.floor(next() * from.length)] as T
+  const props: Prop[] = []
+  const floor = SPRITE_ROWS - 1
+  for (let x = 1 + Math.floor(next() * 4); x < columns - 3; x += 6 + Math.floor(next() * 9)) {
+    if (next() < 0.3) {
+      // A bloom: a head, and a stem two rows tall.
+      props.push({ x, row: floor - 2, glyph: glyphOf('*'), color: pick(SCENE.bloom) })
+      props.push({ x, row: floor - 1, glyph: glyphOf('|'), color: SCENE.grass[2] ?? 0 })
+      props.push({ x, row: floor, glyph: glyphOf('|'), color: SCENE.grass[2] ?? 0 })
+      continue
+    }
+    const height = 1 + Math.floor(next() * 3)
+    for (let up = 0; up < height; up += 1) {
+      const blades = up === 0 ? '\\|/' : up === 1 ? '\\ /' : ' | '
+      for (let k = 0; k < 3; k += 1) {
+        const blade = blades[k] ?? ' '
+        if (blade !== ' ') props.push({ x: x + k, row: floor - up, glyph: glyphOf(blade), color: pick(SCENE.grass) })
+      }
+    }
+  }
+  for (let k = 0; k < Math.floor(columns / 9); k += 1) {
+    props.push({ x: Math.floor(next() * columns), row: Math.floor(next() * (floor - 1)), glyph: glyphOf('.'), color: SCENE.mote })
+  }
+  scene.props = props
+  scene.laidFor = columns
+}
+
+/** Where the cat's head is, in cells: what it says and raises starts there. */
+const headAt = (columns: number) => {
+  const left = Math.round(Math.max(0, Math.min(actor.x, columns - SPRITE_COLUMNS)))
+
+  return { left, x: actor.beat.isFlipped ? left + 5 : left + SPRITE_COLUMNS - 6, row: 2 }
+}
+
+/** Throws `count` specks up from the cat's head. */
+const burst = (count: number, glyph: string, colors: readonly number[], spread: number) => {
+  const head = headAt(stage.columns || 80)
+  for (let k = 0; k < count; k += 1) {
+    scene.specks.push({
+      x: head.x + (Math.random() - 0.5) * 4,
+      y: head.row + Math.random() * 2,
+      dx: (Math.random() - 0.5) * spread,
+      dy: -(0.05 + Math.random() * 0.12),
+      age: 0,
+      life: 900 + Math.random() * 1100,
+      glyph: glyphOf(glyph),
+      colors,
+    })
+  }
+  if (scene.specks.length > 60) scene.specks.splice(0, scene.specks.length - 60)
+}
+
+/** Only what a Raster cell takes for sure: Latin letters, digits, plain punctuation. */
+const plain = (text: string) =>
+  text
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\u2026/g, '...')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[^\u0020-\u007e\u00a0-\u017f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const BUBBLE_WIDTH = 28
+const BUBBLE_LINES = 3
+
+/** Puts words in the cat's mouth for a while: wrapped, cut, and plain. */
+const say = (text: string, ms = 7000) => {
+  const lines: string[] = []
+  let line = ''
+  for (const word of plain(text).split(' ')) {
+    if (line && line.length + 1 + word.length > BUBBLE_WIDTH) {
+      lines.push(line)
+      line = ''
+    }
+    line = line ? `${line} ${word}` : word.slice(0, BUBBLE_WIDTH)
+  }
+  if (line) lines.push(line)
+  if (lines.length === 0) return
+  scene.lines = lines.slice(0, BUBBLE_LINES)
+  scene.saysUntil = scene.clock + ms
+  scene.isDirty = true
+}
+
+/** Moves the scene on by `ms`; true when what is drawn changed. */
+const stepScene = (ms: number) => {
+  const before = Math.floor(scene.clock / 420)
+  scene.clock += ms
+  let hasMoved = scene.isDirty
+  scene.isDirty = false
+  if (scene.specks.length > 0) {
+    for (const one of scene.specks) {
+      one.age += ms
+      one.x += one.dx
+      one.y += one.dy
+    }
+    scene.specks = scene.specks.filter(one => one.age < one.life && one.y > -1)
+    hasMoved = true
+  }
+  if (scene.lines.length > 0 && scene.clock >= scene.saysUntil) {
+    scene.lines = []
+    hasMoved = true
+  }
+  // The bug ambles along the ground, a cell every beat of the slow clock.
+  if (Math.floor(scene.clock / 420) !== before) {
+    scene.bugX -= 1
+    hasMoved = true
+  }
+
+  return hasMoved
+}
+
+/**
+ * The strip as Raster cells, `columns` wide and STRIP_ROWS tall: the meadow, the
+ * bug, the specks, the cat over them, what it says over the cat, the ground.
+ */
 const spriteStrip = (columns: number, ground: string, ink: string, mood: string) => {
+  if (scene.laidFor !== columns) layProps(columns)
+  const base = rgb(ground)
+  const pen = rgb(ink)
+  const total = columns * STRIP_ROWS
+  const glyphs = new Uint32Array(total).fill(0x20)
+  const fore = new Uint32Array(total).fill(base)
+  const back = new Uint32Array(total).fill(base)
+  const put = (row: number, x: number, glyph: number, color: number, behind = base) => {
+    if (row < 0 || row >= STRIP_ROWS || x < 0 || x >= columns) return
+    const cell = row * columns + x
+    glyphs[cell] = glyph
+    fore[cell] = color
+    back[cell] = behind
+  }
+
+  for (const one of scene.props) put(one.row, one.x, one.glyph, one.color)
+
+  const bugAt = ((scene.bugX % (columns + 6)) + columns + 6) % (columns + 6) - 3
+  '}o{'.split('').forEach((part, k) => put(SPRITE_ROWS - 1, bugAt + k, glyphOf(part), SCENE.bug))
+
+  for (const one of scene.specks) {
+    const shade = one.colors[Math.min(one.colors.length - 1, Math.floor((one.age / one.life) * one.colors.length))]
+    put(Math.round(one.y), Math.round(one.x), one.glyph, shade ?? pen)
+  }
+
+  // The cat, over all that: only the cells it has a pixel in.
   const clip = CLIPS[actor.beat.clip]
   const frame = clip.frames[actor.beat.frames[actor.at] ?? 0] ?? clip.frames[0]
   const left = Math.round(Math.max(0, Math.min(actor.x, columns - SPRITE_COLUMNS)))
-  const base = rgb(ground)
-  /** The color of one pixel of the strip, the frame laid `left` cells in. */
+  /** The color of one pixel of the frame, or -1 where the frame is clear. */
   const at = (y: number, x: number) => {
-    const inFrame = x - left * CELL_W
-    if (inFrame < 0 || inFrame >= SPRITE_W) return base
-    const seen = frame[y * SPRITE_W + (actor.beat.isFlipped ? SPRITE_W - 1 - inFrame : inFrame)] ?? '.'
+    const seen = frame[y * SPRITE_W + (actor.beat.isFlipped ? SPRITE_W - 1 - x : x)] ?? '.'
 
-    return seen === '.' ? base : (SPRITE_PALETTE[SPRITE_INK.indexOf(seen)] ?? base)
+    return seen === '.' ? -1 : (SPRITE_PALETTE[SPRITE_INK.indexOf(seen)] ?? -1)
   }
-  const words = new Uint32Array(columns * SPRITE_ROWS * 3)
   const four = [0, 0, 0, 0]
   for (let row = 0; row < SPRITE_ROWS; row += 1) {
-    for (let x = 0; x < columns; x += 1) {
-      const cell = (row * columns + x) * 3
+    for (let col = 0; col < SPRITE_COLUMNS; col += 1) {
       if (!IS_FINE) {
-        words[cell] = LOWER_HALF
-        words[cell + 1] = at(row * 2 + 1, x)
-        words[cell + 2] = at(row * 2, x)
+        const top = at(row * 2, col)
+        const bottom = at(row * 2 + 1, col)
+        if (top < 0 && bottom < 0) continue
+        put(row, left + col, LOWER_HALF, bottom < 0 ? base : bottom, top < 0 ? base : top)
         continue
       }
       // Four pixels, two colors: the commonest is the ground of the cell, the
       // next its ink, and any third goes to whichever of the two it is nearer.
-      let back = base
-      let backCount = 0
-      let fore = base
-      let foreCount = 0
-      for (let k = 0; k < 4; k += 1) four[k] = at(row * 2 + (k >> 1), x * 2 + (k & 1))
+      let clear = 0
+      for (let k = 0; k < 4; k += 1) {
+        const seen = at(row * 2 + (k >> 1), col * 2 + (k & 1))
+        if (seen < 0) clear += 1
+        four[k] = seen < 0 ? base : seen
+      }
+      if (clear === 4) continue
+      let behind = base
+      let behindCount = 0
+      let front = base
+      let frontCount = 0
       for (let k = 0; k < 4; k += 1) {
         let same = 0
         for (let j = 0; j < 4; j += 1) if (four[j] === four[k]) same += 1
-        if (same > backCount) {
-          if (four[k] !== back) {
-            fore = back
-            foreCount = backCount
+        if (same > behindCount) {
+          if (four[k] !== behind) {
+            front = behind
+            frontCount = behindCount
           }
-          back = four[k] ?? base
-          backCount = same
-        } else if (four[k] !== back && same > foreCount) {
-          fore = four[k] ?? base
-          foreCount = same
+          behind = four[k] ?? base
+          behindCount = same
+        } else if (four[k] !== behind && same > frontCount) {
+          front = four[k] ?? base
+          frontCount = same
         }
       }
       let bits = 0
-      if (foreCount > 0) {
+      if (frontCount > 0) {
         for (let k = 0; k < 4; k += 1) {
           const color = four[k] ?? base
-          if (color !== back && (color === fore || apart(color, fore) < apart(color, back))) bits |= 1 << k
+          if (color !== behind && (color === front || apart(color, front) < apart(color, behind))) bits |= 1 << k
         }
       }
-      words[cell] = QUADRANTS[bits] ?? 0x20
-      words[cell + 1] = fore
-      words[cell + 2] = back
+      put(row, left + col, QUADRANTS[bits] ?? 0x20, front, behind)
     }
   }
-  const sign = actor.beat.clip === 'sleep' ? 'z' : mood
-  if (sign) {
-    const beside = actor.beat.isFlipped ? left + 1 : left + SPRITE_COLUMNS - 2
-    if (beside >= 0 && beside < columns) {
-      words[beside * 3] = sign.codePointAt(0) ?? 0x20
-      words[beside * 3 + 1] = rgb(ink)
-      words[beside * 3 + 2] = base
+
+  // What it says, in a frame beside its head: on the side with room.
+  if (scene.lines.length > 0) {
+    const wide = Math.max(...scene.lines.map(one => one.length)) + 4
+    // Close to the head: the frame's cells are clear well inside the sprite's box.
+    const head = headAt(columns)
+    const isRight = head.x + 6 + wide <= columns
+    const from = isRight ? head.x + 6 : head.x - 6 - wide
+    if (from >= 0) {
+      const rim = rgb('#6b7699')
+      const last = scene.lines.length + 1
+      for (let row = 0; row <= last; row += 1) {
+        for (let x = 0; x < wide; x += 1) {
+          const isEdgeRow = row === 0 || row === last
+          const isEdgeCol = x === 0 || x === wide - 1
+          const corner = row === 0 ? (x === 0 ? '╭' : '╮') : x === 0 ? '╰' : '╯'
+          const glyph = isEdgeRow && isEdgeCol ? corner : isEdgeRow ? '─' : isEdgeCol ? '│' : ' '
+          put(row, from + x, glyphOf(glyph), rim)
+        }
+        if (row > 0 && row < last) {
+          const text = scene.lines[row - 1] ?? ''
+          for (let k = 0; k < text.length; k += 1) put(row, from + 2 + k, glyphOf(text[k] ?? ' '), pen)
+        }
+      }
     }
+  }
+
+  const sign = actor.beat.clip === 'sleep' ? 'z' : mood
+  if (sign && scene.lines.length === 0) {
+    put(0, actor.beat.isFlipped ? left + 1 : left + SPRITE_COLUMNS - 2, glyphOf(sign), pen)
+  }
+
+  // The ground, last: a band the height of half a cell, under everything.
+  for (let x = 0; x < columns; x += 1) put(SPRITE_ROWS, x, 0x2580, SCENE.ground)
+
+  const words = new Uint32Array(total * 3)
+  for (let cell = 0; cell < total; cell += 1) {
+    words[cell * 3] = glyphs[cell] ?? 0x20
+    words[cell * 3 + 1] = fore[cell] ?? base
+    words[cell * 3 + 2] = back[cell] ?? base
   }
 
   return toBase64(new Uint8Array(words.buffer))
@@ -1609,6 +1845,23 @@ const keep = async ($: EngineInterface, change: (was: Board) => Board) => {
   await $.store.set(await shelf($), now).catch(() => undefined)
 }
 
+const QUIP =
+  "Tu es un chat de bureau qui regarde un agent de code travailler et commente, pince-sans-rire, " +
+  'comme un documentaire animalier ou une remarque de chat. Une seule phrase de 70 caractères ' +
+  'maximum, en français, sans guillemets, sans emoji, sans préambule.'
+
+/** Has haiku word what the cat thinks of it; detached, the turn never waits on it. */
+const quip = ($: EngineInterface, about: string) => {
+  if (stage.style !== 'sprite') return
+  void $.model
+    .complete({ model: 'haiku', maxTokens: 60, system: QUIP, prompt: about })
+    .then(told => {
+      const line = told.isAnswered ? told.text.trim().split('\n')[0]?.trim() : ''
+      if (line) say(line, 9000)
+    })
+    .catch(() => undefined)
+}
+
 /** Reads the session's own counters into the atom the cards draw from. */
 const meterUsage = async ($: EngineInterface) => {
   const seen = await $.session.usage()
@@ -1808,7 +2061,10 @@ export const register: Register = on => {
 
   // The person is typing: the cat sits up. Nothing awaited, the keystroke must not wait.
   on('prompt.edit', ($, e, next) => {
-    if (actor.typing <= 0) actor.isCalled = true
+    if (actor.typing <= 0) {
+      actor.isCalled = true
+      say("Je t'écoute.", 2500)
+    }
     actor.typing = TYPING_MS
 
     return next(e)
@@ -1821,6 +2077,9 @@ export const register: Register = on => {
     await meterUsage($).catch(() => undefined)
 
     const seated = await read($, focus)
+    if (!(e as { agentId?: unknown }).agentId && seated.ask.trim()) {
+      quip($, `L'humain vient de demander ceci à l'agent :\n${seated.ask.trim().slice(0, 400)}`)
+    }
     if (!seated.isDismissed) {
       const up = await $.ui.panes()
       if (!up.some(one => one.id === PANE)) void $.ui.open({ id: PANE, title: 'Focus' })
@@ -1850,6 +2109,8 @@ export const register: Register = on => {
     }
 
     if (ASKING.includes(String(e.tool))) await_(true)
+    // Each call raises a little dust off the cat's back.
+    if (!e.agentId) burst(3, '■', SCENE.ember, 0.3)
 
     const close = async (isError: boolean) => {
       await_(false)
@@ -1971,6 +2232,10 @@ export const register: Register = on => {
       was.map(one => (one.ms === null ? { ...one, ms: 0, isError: e.isAborted } : one)),
     )
     await meterUsage($).catch(() => undefined)
+
+    if (!e.isAborted && e.answer.trim()) {
+      quip($, `L'agent vient de finir son tour. Sa conclusion :\n${e.answer.trim().slice(0, 400)}`)
+    }
 
     // The answer often links the documents it published; else the ticket is asked again.
     missed.clear()
@@ -2269,7 +2534,7 @@ export const register: Register = on => {
     // No Image on this surface, or a terminal that refused it: the sprite cat.
     const style: PetStyle = fitted === 'png' && (Image === undefined || imageRefusal !== '') ? 'sprite' : fitted
     const petRows =
-      style === 'png' ? PNG_ROWS : style === 'sprite' ? SPRITE_ROWS : style === '3d' ? CAT3_ROWS : style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
+      style === 'png' ? PNG_ROWS : style === 'sprite' ? STRIP_ROWS : style === '3d' ? CAT3_ROWS : style === 'pixel' ? PET_ROWS : style === 'line' ? LINE_ROWS : 0
     const mood = pet.isAsleep
       ? 'z'
       : pet.moodTicks > 0
@@ -2685,7 +2950,7 @@ export const register: Register = on => {
           <Raster
             key="pet"
             columns={room}
-            rows={SPRITE_ROWS}
+            rows={STRIP_ROWS}
             // The moods are clips here; only sleep and the context warning stay a character.
             cells={spriteStrip(room, tone.panel, tone.text, mood === "'" ? mood : '')}
           />

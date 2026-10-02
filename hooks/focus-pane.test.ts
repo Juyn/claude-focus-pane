@@ -594,7 +594,7 @@ test('the sprite cat lives on a strip as wide as the pane; an ansi theme gets th
 
   expect(strip?.type).toBe('Raster')
   expect(strip?.props.columns).toBe(98)
-  expect(strip?.props.rows).toBe(12)
+  expect(strip?.props.rows).toBe(13)
   await pane.unmount()
 
   await wear($, 'dark-ansi')
@@ -634,4 +634,19 @@ test('pet 3d walks the ray-marched cat', async ($, on) => {
 
   expect(strip?.type).toBe('Raster')
   expect(strip?.props.rows).toBe(10)
+})
+
+test('the scene around the cat draws its specks and what it says without a refused cell', async ($, on) => {
+  engine(on)
+  // A failed call raises red crosses and an "Aïe."; a finished todo, sparks.
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  await $.tool.call({
+    tool: 'TodoWrite',
+    todos: [{ content: 'Écrire le test', status: 'completed', activeForm: 'Écriture du test' }],
+  })
+  const pane = await mounted($, 100)
+  const strip = await pane.find({ key: 'pet' })
+
+  expect(strip?.type).toBe('Raster')
+  expect(strip?.props.rows).toBe(13)
 })
