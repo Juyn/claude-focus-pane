@@ -1,0 +1,650 @@
+{
+  "image": "decor-sheet.png",
+  "cellWidth": 16,
+  "cellHeight": 16,
+  "columns": 16,
+  "rows": 23,
+  "width": 256,
+  "height": 368,
+  "notes": "x,y,w,h = première image (case, en px). Images suivantes : x + i*w. bbox = contenu dessiné, relatif à la case. anchor ground : bas du contenu à y=15.",
+  "palette": [
+    "#8fd14f",
+    "#4f9a3a",
+    "#c08a3e",
+    "#7a4524",
+    "#2f6b34",
+    "#f2c230",
+    "#8a6fd8",
+    "#f28fa0",
+    "#e8873a",
+    "#d8463c",
+    "#f6b56b",
+    "#6d6a7c",
+    "#c9cfe0",
+    "#2c2b34",
+    "#3b4a5e"
+  ],
+  "elements": [
+    {
+      "name": "ground_a",
+      "x": 0,
+      "y": 0,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "back",
+      "bbox": {
+        "x": 0,
+        "y": 12,
+        "w": 16,
+        "h": 4
+      },
+      "tile": "16x4",
+      "tileable": "x"
+    },
+    {
+      "name": "ground_b",
+      "x": 16,
+      "y": 0,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "back",
+      "bbox": {
+        "x": 0,
+        "y": 12,
+        "w": 16,
+        "h": 4
+      },
+      "tile": "16x4",
+      "tileable": "x"
+    },
+    {
+      "name": "ground_c",
+      "x": 32,
+      "y": 0,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "back",
+      "bbox": {
+        "x": 0,
+        "y": 12,
+        "w": 16,
+        "h": 4
+      },
+      "tile": "16x4",
+      "tileable": "x"
+    },
+    {
+      "name": "grass_short",
+      "x": 0,
+      "y": 16,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 450,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "front",
+      "bbox": {
+        "x": 4,
+        "y": 12,
+        "w": 7,
+        "h": 4
+      }
+    },
+    {
+      "name": "grass_medium",
+      "x": 0,
+      "y": 32,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 450,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "front",
+      "bbox": {
+        "x": 4,
+        "y": 11,
+        "w": 8,
+        "h": 5
+      }
+    },
+    {
+      "name": "grass_tall",
+      "x": 0,
+      "y": 48,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 450,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "front",
+      "bbox": {
+        "x": 3,
+        "y": 10,
+        "w": 9,
+        "h": 6
+      }
+    },
+    {
+      "name": "grass_sparse",
+      "x": 0,
+      "y": 64,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 450,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "front",
+      "bbox": {
+        "x": 2,
+        "y": 12,
+        "w": 11,
+        "h": 4
+      }
+    },
+    {
+      "name": "flower_yellow_grow",
+      "x": 0,
+      "y": 80,
+      "w": 16,
+      "h": 16,
+      "frames": 3,
+      "frameDurationMs": 260,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 4,
+        "y": 6,
+        "w": 7,
+        "h": 10
+      }
+    },
+    {
+      "name": "flower_yellow_sway",
+      "x": 48,
+      "y": 80,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 420,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 3,
+        "y": 6,
+        "w": 9,
+        "h": 10
+      },
+      "restFrame": "flower_yellow_grow #3",
+      "note": "cols 2-3 de grow = même x"
+    },
+    {
+      "name": "flower_violet_grow",
+      "x": 0,
+      "y": 96,
+      "w": 16,
+      "h": 16,
+      "frames": 3,
+      "frameDurationMs": 260,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 4,
+        "y": 6,
+        "w": 7,
+        "h": 10
+      }
+    },
+    {
+      "name": "flower_violet_sway",
+      "x": 48,
+      "y": 96,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 420,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 3,
+        "y": 6,
+        "w": 9,
+        "h": 10
+      },
+      "restFrame": "flower_violet_grow #3",
+      "note": "cols 2-3 de grow = même x"
+    },
+    {
+      "name": "flower_pink_grow",
+      "x": 0,
+      "y": 112,
+      "w": 16,
+      "h": 16,
+      "frames": 3,
+      "frameDurationMs": 260,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 4,
+        "y": 6,
+        "w": 7,
+        "h": 10
+      }
+    },
+    {
+      "name": "flower_pink_sway",
+      "x": 48,
+      "y": 112,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 420,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 3,
+        "y": 6,
+        "w": 9,
+        "h": 10
+      },
+      "restFrame": "flower_pink_grow #3",
+      "note": "cols 2-3 de grow = même x"
+    },
+    {
+      "name": "mushroom_a",
+      "x": 0,
+      "y": 128,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 4,
+        "y": 9,
+        "w": 8,
+        "h": 7
+      }
+    },
+    {
+      "name": "mushroom_b",
+      "x": 16,
+      "y": 128,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 5,
+        "y": 8,
+        "w": 6,
+        "h": 8
+      }
+    },
+    {
+      "name": "mushroom_a_appear",
+      "x": 32,
+      "y": 128,
+      "w": 16,
+      "h": 16,
+      "frames": 3,
+      "frameDurationMs": 140,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 4,
+        "y": 11,
+        "w": 8,
+        "h": 5
+      },
+      "then": "mushroom_a"
+    },
+    {
+      "name": "rock_a",
+      "x": 0,
+      "y": 144,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 4,
+        "y": 12,
+        "w": 7,
+        "h": 4
+      }
+    },
+    {
+      "name": "rock_b",
+      "x": 16,
+      "y": 144,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 5,
+        "y": 13,
+        "w": 5,
+        "h": 3
+      }
+    },
+    {
+      "name": "bush",
+      "x": 0,
+      "y": 160,
+      "w": 32,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "back",
+      "bbox": {
+        "x": 4,
+        "y": 3,
+        "w": 25,
+        "h": 13
+      },
+      "cells": 2
+    },
+    {
+      "name": "signpost",
+      "x": 0,
+      "y": 176,
+      "w": 32,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "back",
+      "bbox": {
+        "x": 2,
+        "y": 2,
+        "w": 28,
+        "h": 14
+      },
+      "cells": 2,
+      "board": {
+        "x": 2,
+        "y": 4,
+        "w": 28,
+        "h": 6,
+        "color": "#7a4524"
+      }
+    },
+    {
+      "name": "butterfly",
+      "x": 0,
+      "y": 192,
+      "w": 16,
+      "h": 16,
+      "frames": 4,
+      "frameDurationMs": 90,
+      "loop": true,
+      "anchor": "air",
+      "layer": "front",
+      "bbox": {
+        "x": 4,
+        "y": 5,
+        "w": 7,
+        "h": 6
+      }
+    },
+    {
+      "name": "beetle",
+      "x": 0,
+      "y": 208,
+      "w": 16,
+      "h": 16,
+      "frames": 4,
+      "frameDurationMs": 120,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "front",
+      "bbox": {
+        "x": 4,
+        "y": 11,
+        "w": 8,
+        "h": 5
+      },
+      "facing": "right"
+    },
+    {
+      "name": "sun",
+      "x": 0,
+      "y": 224,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "air",
+      "layer": "back",
+      "bbox": {
+        "x": 1,
+        "y": 1,
+        "w": 13,
+        "h": 13
+      }
+    },
+    {
+      "name": "moon",
+      "x": 16,
+      "y": 224,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "air",
+      "layer": "back",
+      "bbox": {
+        "x": 3,
+        "y": 3,
+        "w": 8,
+        "h": 9
+      }
+    },
+    {
+      "name": "cloud_a",
+      "x": 0,
+      "y": 240,
+      "w": 32,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "air",
+      "layer": "back",
+      "bbox": {
+        "x": 4,
+        "y": 2,
+        "w": 26,
+        "h": 11
+      },
+      "cells": 2
+    },
+    {
+      "name": "cloud_b",
+      "x": 32,
+      "y": 240,
+      "w": 32,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "air",
+      "layer": "back",
+      "bbox": {
+        "x": 6,
+        "y": 4,
+        "w": 20,
+        "h": 8
+      },
+      "cells": 2
+    },
+    {
+      "name": "star",
+      "x": 0,
+      "y": 256,
+      "w": 16,
+      "h": 16,
+      "frames": 2,
+      "frameDurationMs": 600,
+      "loop": true,
+      "anchor": "air",
+      "layer": "back",
+      "bbox": {
+        "x": 5,
+        "y": 5,
+        "w": 5,
+        "h": 5
+      }
+    },
+    {
+      "name": "hills",
+      "x": 0,
+      "y": 272,
+      "w": 32,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "back",
+      "bbox": {
+        "x": 0,
+        "y": 7,
+        "w": 32,
+        "h": 9
+      },
+      "cells": 2,
+      "tileable": "x"
+    },
+    {
+      "name": "tree",
+      "x": 0,
+      "y": 288,
+      "w": 16,
+      "h": 16,
+      "frames": 1,
+      "frameDurationMs": 0,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "back",
+      "bbox": {
+        "x": 1,
+        "y": 1,
+        "w": 15,
+        "h": 15
+      }
+    },
+    {
+      "name": "lasagne",
+      "x": 0,
+      "y": 304,
+      "w": 16,
+      "h": 16,
+      "frames": 3,
+      "frameDurationMs": 220,
+      "loop": true,
+      "anchor": "ground",
+      "layer": "mid",
+      "bbox": {
+        "x": 0,
+        "y": 0,
+        "w": 16,
+        "h": 16
+      }
+    },
+    {
+      "name": "sparkle",
+      "x": 0,
+      "y": 320,
+      "w": 16,
+      "h": 16,
+      "frames": 4,
+      "frameDurationMs": 90,
+      "loop": false,
+      "anchor": "air",
+      "layer": "front",
+      "bbox": {
+        "x": 4,
+        "y": 4,
+        "w": 7,
+        "h": 7
+      }
+    },
+    {
+      "name": "dust",
+      "x": 0,
+      "y": 336,
+      "w": 16,
+      "h": 16,
+      "frames": 4,
+      "frameDurationMs": 110,
+      "loop": false,
+      "anchor": "ground",
+      "layer": "front",
+      "bbox": {
+        "x": 3,
+        "y": 11,
+        "w": 10,
+        "h": 5
+      }
+    },
+    {
+      "name": "zzz",
+      "x": 0,
+      "y": 352,
+      "w": 16,
+      "h": 16,
+      "frames": 3,
+      "frameDurationMs": 400,
+      "loop": true,
+      "anchor": "air",
+      "layer": "front",
+      "bbox": {
+        "x": 0,
+        "y": 0,
+        "w": 15,
+        "h": 15
+      }
+    }
+  ]
+}

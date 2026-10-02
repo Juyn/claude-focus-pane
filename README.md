@@ -96,10 +96,10 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission spec <feature>` | binds a Sacred Book feature by folder name or ticket (`console-comptes`, `UNL-4844`); `spec off` unbinds |
 | `/mission mission <text>` | sets the mission by hand |
 | `/mission <text>` / `auto` | pins the action line / hands it back to the model |
-| (the scene) | the sprite cat lives in a small meadow: grass, blooms, a bug ambling by, dust raised by each tool call, sparks on a finished todo, and a speech bubble — canned lines for events, and one quip a turn start and a turn end, worded by haiku |
+| (the scene) | the cat lives in a small meadow drawn from `assets/decor/decor-sheet.png`: sun or moon by the hour, a cloud adrift, hills, grass that sways, a ladybird and a butterfly. It tells the session too: a bloom grows for each finished todo, a mushroom comes up for each failed call, a signpost carries the ticket, dust rises at each tool call, and a speech bubble holds canned lines and one quip a turn start and a turn end, worded by haiku |
 | `/mission cat roux` / `noir` / `garfield` | which cat walks the pane; remembered |
 | `/mission lasagne` | serves a steaming dish in the scene: for a minute the cat tears from end to end and leaps, under a wave of lit squares rolling across like an RGB keyboard's; `lasagne off` clears the table |
-| `/mission pet sprite` / `big` | its size: small (32 columns, 10 to 13 rows) or big (64 columns by 19 rows, three times the pixels) |
+| `/mission pet sprite` / `big` | its size: small (32 columns, 11 to 14 rows) or big (64 columns by 20 rows, three times the pixels) |
 | `/mission pet png` | the cat as a real image (64×36 frames from `assets/frames/`, 9 rows), where the terminal draws pictures (kitty graphics protocol); elsewhere it says so and falls back to `sprite`. `python3 scripts/build-frames.py` cuts the frames |
 | `/mission pet sprite` / `3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: the sprite sheet (12 rows, default), ray-marched 3D (10 rows), line art (9 rows), flat pixels (3 rows), or sent in |
 | `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity, notes — to see it full; the notes are shown, never stored |
@@ -122,7 +122,8 @@ claude plugin test .
 
 The cats live under `assets/cats/<name>/`: `cat-sheet.png` is the 64×36 sheet drawn big, and
 `cat-sheet-small.png` a 32×24 one where the cat has it (else the big sheet is sampled down by half);
-each has its JSON manifest beside it. `python3 scripts/build-sprites.py` bakes them all into the
+each has its JSON manifest beside it. The decor is `assets/decor/decor-sheet.png`, 16×16 cases, its
+elements named in `decor-sheet.json`. `python3 scripts/build-sprites.py` bakes them all into the
 module: run it again after changing or adding a sheet (a new cat is a folder, a name in the script's
 `ORDER`, and a value of `PetCoat`). Both sizes are drawn in half blocks, one pixel a half cell: a
 Raster cell takes no character beyond the Basic Multilingual Plane, which rules sextants out, and a

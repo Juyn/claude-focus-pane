@@ -594,7 +594,7 @@ test('the sprite cat lives on a strip as wide as the pane; an ansi theme gets th
 
   expect(strip?.type).toBe('Raster')
   expect(strip?.props.columns).toBe(98)
-  expect(strip?.props.rows).toBe(13)
+  expect(strip?.props.rows).toBe(14)
   await pane.unmount()
 
   await wear($, 'dark-ansi')
@@ -648,7 +648,7 @@ test('the scene around the cat draws its specks and what it says without a refus
   const strip = await pane.find({ key: 'pet' })
 
   expect(strip?.type).toBe('Raster')
-  expect(strip?.props.rows).toBe(13)
+  expect(strip?.props.rows).toBe(14)
 })
 
 test('pet big draws the 64 by 36 sheet over 18 rows and its ground', async ($, on) => {
@@ -657,7 +657,7 @@ test('pet big draws the 64 by 36 sheet over 18 rows and its ground', async ($, o
   const strip = await (await mounted($, 100)).find({ key: 'pet' })
 
   expect(strip?.type).toBe('Raster')
-  expect(strip?.props.rows).toBe(19)
+  expect(strip?.props.rows).toBe(20)
 })
 
 test('cat picks which cat walks the pane, at either size', async ($, on) => {
@@ -665,12 +665,12 @@ test('cat picks which cat walks the pane, at either size', async ($, on) => {
   await $.command.run({ command: 'mission', args: 'cat noir', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   const small = await mounted($, 100)
 
-  // The black cat has no small sheet of its own: the big one by half, 9 rows and the ground.
-  expect((await small.find({ key: 'pet' }))?.props.rows).toBe(10)
+  // The black cat has no small sheet of its own: the big one by half, 9 rows and the ground's 2.
+  expect((await small.find({ key: 'pet' }))?.props.rows).toBe(11)
   await small.unmount()
 
   await petCommand($, 'big')
-  expect((await (await mounted($, 100)).find({ key: 'pet' }))?.props.rows).toBe(19)
+  expect((await (await mounted($, 100)).find({ key: 'pet' }))?.props.rows).toBe(20)
 })
 
 test('lasagne serves the dish in the scene, in cells the engine takes', async ($, on) => {
