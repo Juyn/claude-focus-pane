@@ -169,6 +169,7 @@ const pace = ($: EngineInterface, isWorking: boolean) => {
   pet.restTicks = 0
   pet.isAsleep = false
   actor.isCalled = true
+  actor.isAwaited = false
   animate($, isWorking)
   ticker = $.clock.every(isWorking ? PET_WORK_MS : PET_REST_MS, () => {
     if (!isWorking) {
@@ -615,6 +616,8 @@ const actor = {
   react: '' as '' | 'happy' | 'alert',
   /** Milliseconds left of "the person is typing": it sits up and watches. */
   typing: 0,
+  /** True while the session waits on the person: a question asked, a permission pending. */
+  isAwaited: false,
   /** Set when what it should do changed: the beat in hand ends at its next frame. */
   isCalled: false,
   queue: [] as Beat[],
@@ -622,6 +625,18 @@ const actor = {
 
 /** How long after a keystroke it still counts the person as typing. */
 const TYPING_MS = 4000
+
+/** The odds that a walk cycle is a hop instead. */
+const HOP_ODDS = 0.22
+
+/** The tools that are the agent asking the person something. */
+const ASKING: readonly string[] = ['AskUserQuestion', 'ExitPlanMode']
+
+/** Puts the cat on guard, or stands it down, the moment the wait starts or ends. */
+const await_ = (isAwaited: boolean) => {
+  if (actor.isAwaited !== isAwaited) actor.isCalled = true
+  actor.isAwaited = isAwaited
+}
 
 const SPRITE_TICK_MS = 60
 
@@ -673,8 +688,17 @@ const direct = (isWorking: boolean, span: number): Beat => {
   const sit: Beat = { clip: 'sit', frames: count(CLIPS.sit.frames.length), isFlipped: false, stride: 0 }
   const lie: Beat = { clip: 'sleep', frames: count(CLIPS.sleep.frames.length), isFlipped, stride: 0 }
 
+  // The session waits on the person: on its feet, back arched, until they answer.
+  // Typing wins over it: they are answering, and it sits to watch.
+  const isOnGuard = actor.isAwaited && !isWatching
+  if (isOnGuard && actor.posture === 'standing') {
+    actor.react = ''
+
+    return { clip: 'alert', frames: [0, 1, 2, 2, 2, 2, 1, 2, 2, 2], isFlipped, stride: 0 }
+  }
+
   if (actor.posture === 'lying') {
-    if (!isWatching && !isWorking) return lie
+    if (!isWatching && !isWorking && !isOnGuard) return lie
     // Up on its haunches first; from there it watches, or sets off.
     actor.posture = 'seated'
     actor.rested = 0
@@ -685,6 +709,11 @@ const direct = (isWorking: boolean, span: number): Beat => {
 
   if (actor.posture === 'seated') {
     if (isWatching) return sit
+    if (isOnGuard) {
+      actor.posture = 'standing'
+
+      return { clip: 'turn', frames: TURN_OUT, isFlipped, stride: 0 }
+    }
     if (!isWorking) {
       actor.posture = 'lying'
 
@@ -724,11 +753,16 @@ const direct = (isWorking: boolean, span: number): Beat => {
     return { clip: 'turn', frames: TURN_IN, isFlipped, stride: 0 }
   }
 
+  // Now and then a hop on the way, for the joy of it.
+  if (Math.random() < HOP_ODDS) {
+    return { clip: 'happy', frames: count(CLIPS.happy.frames.length), isFlipped, stride: actor.heading }
+  }
+
   return { clip: 'walk', frames: count(CLIPS.walk.frames.length), isFlipped, stride: actor.heading }
 }
 
 /** The clips that loop, and so may be cut short when it is called to something else. */
-const LOOPS: readonly ClipName[] = ['walk', 'run', 'sit', 'sleep']
+const LOOPS: readonly ClipName[] = ['walk', 'run', 'sit', 'sleep', 'alert']
 
 /** Moves the sprite cat on by `ms`; true when what is drawn changed. */
 const stepSprite = (ms: number, isWorking: boolean, columns: number) => {
@@ -1639,6 +1673,15 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // A call the engine will ask the person to allow: the session waits on them
+  // until the call ends, allowed or not.
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+    if ((verdict as { decision?: unknown }).decision === 'ask') await_(true)
+
+    return verdict
+  })
+
   // The person is typing: the cat sits up. Nothing awaited, the keystroke must not wait.
   on('prompt.edit', ($, e, next) => {
     if (actor.typing <= 0) actor.isCalled = true
@@ -1682,7 +1725,10 @@ export const register: Register = on => {
       if (known) await noticeFeature($, known).catch(() => undefined)
     }
 
+    if (ASKING.includes(String(e.tool))) await_(true)
+
     const close = async (isError: boolean) => {
+      await_(false)
       if (isError) feel('!')
       const ms = (await $.clock.now()) - at
       await update($, feed, was => was.map(one => (one.id === id ? { ...one, ms, isError } : one)))
