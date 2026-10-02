@@ -587,14 +587,14 @@ const start = async ($: Engine, on: On) => {
 const petCommand = ($: Engine, style: string) =>
   $.command.run({ command: 'mission', args: `pet ${style}`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
 
-test('the 3D cat walks a strip as wide as the pane; an ansi theme gets the line cat', async ($, on) => {
+test('the sprite cat lives on a strip as wide as the pane; an ansi theme gets the line cat', async ($, on) => {
   engine(on)
   const pane = await mounted($, 100)
   const strip = await pane.find({ key: 'pet' })
 
   expect(strip?.type).toBe('Raster')
   expect(strip?.props.columns).toBe(98)
-  expect(strip?.props.rows).toBe(10)
+  expect(strip?.props.rows).toBe(12)
   await pane.unmount()
 
   await wear($, 'dark-ansi')
@@ -625,4 +625,13 @@ test('pet off sends the cat in', async ($, on) => {
   await petCommand($, 'off')
 
   expect(await (await mounted($, 100)).find({ key: 'pet' })).toBeUndefined()
+})
+
+test('pet 3d walks the ray-marched cat', async ($, on) => {
+  await start($, on)
+  await petCommand($, '3d')
+  const strip = await (await mounted($, 100)).find({ key: 'pet' })
+
+  expect(strip?.type).toBe('Raster')
+  expect(strip?.props.rows).toBe(10)
 })
