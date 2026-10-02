@@ -2279,7 +2279,10 @@ const BAO_SAYS = {
   sleep: ['sieste planifiée.', 'ne pas déranger.'],
 } as const
 const BAO_CONFETTI = [0xfcd1ff, 0x7996ff, 0x3fcc8c, 0xffbf49, 0xf2efe8]
-/** A heart five pixels across, for a reward. */
+/** Seconds between two of Bao's idle hearts, on average. */
+const BAO_HEART_EVERY = 7
+
+/** A heart five pixels across: for a reward, and now and then for nothing. */
 const BAO_HEART = ['.X.X.', 'XXXXX', '.XXX.', '..X..'] as const
 
 /** Something adrift in Bao's world, in cells: a square, a word, a heart, a ring, a leaf. */
@@ -2532,6 +2535,21 @@ const stepBao = (ms: number, isWorking: boolean) => {
         bao.state = dice > 0.5 && Math.abs(bao.goal - bao.x) > 12 ? 'roll' : 'walk'
         if (Math.random() < 0.5) baoSay(bao.state)
       }
+    }
+  }
+  // Now and then, for no reason at all, a little pink heart or two float up from its head.
+  if (bao.state !== 'sleep' && bao.state !== 'roll' && Math.random() < dt / BAO_HEART_EVERY) {
+    const count = Math.random() < 0.4 ? 2 : 1
+    for (let k = 0; k < count; k += 1) {
+      bao.parts.push({
+        x: bao.x + 7 + baoBetween(-5, 5),
+        y: BAO_GROUND - 18 - baoBetween(0, 2),
+        vx: baoBetween(-0.8, 0.8),
+        vy: baoBetween(-4.5, -2.8),
+        life: baoBetween(1.6, 2.4),
+        color: 0xfcd1ff,
+        isHeart: true,
+      })
     }
   }
   // A leaf lets go of a stalk now and then, and drifts down.
