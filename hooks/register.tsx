@@ -2327,7 +2327,6 @@ const bao = {
   combo: 0,
   ateAt: -99,
   flash: 0,
-  pop: 0,
   level: null as { n: number; at: number } | null,
   /** What is due a little later on Bao's clock: the fireworks of a new level. */
   later: [] as { at: number; run: () => void }[],
@@ -2399,7 +2398,6 @@ const baoReward = () => {
   bao.ateAt = bao.t
   bao.hop = 0.55
   bao.flash = 0.18
-  bao.pop = 0.5
   baoBurst(cx, cy, 26 + bao.combo * 6)
   for (let k = 0; k < 3; k += 1) {
     bao.parts.push({ x: cx + baoBetween(-5, 5), y: cy - baoBetween(0, 2.5), vx: baoBetween(-1, 1), vy: baoBetween(-5, -3), life: 2, color: 0xfcd1ff, isHeart: true })
@@ -2442,7 +2440,6 @@ const stepBao = (ms: number, isWorking: boolean) => {
   if (actor.typing > 0) actor.typing -= ms
   bao.hop = Math.max(0, bao.hop - dt)
   bao.flash = Math.max(0, bao.flash - dt)
-  bao.pop = Math.max(0, bao.pop - dt)
   if (bao.combo > 0 && bao.t - bao.ateAt > 20) bao.combo = 0
   bao.blink -= dt
   if (bao.blink < -3.5 - Math.random() * 3) bao.blink = 0.15
@@ -2735,15 +2732,6 @@ const baoStrip = (columns: number) => {
     }
   }
 
-  // The count of bamboos eaten, its combo and how long the combo has left.
-  const tally = `bambous ${String(bao.score).padStart(2, '0')}`
-  write(2, 0, tally, bao.pop > 0 ? 0x8ff0c4 : 0x3fcc8c)
-  if (bao.combo > 1) write(2 + tally.length, 0, ` x${bao.combo}`, 0xffbf49)
-  if (bao.combo > 0) {
-    const left12 = Math.round(12 * Math.max(0, 1 - (bao.t - bao.ateAt) / 20))
-    cell(2, 2, 0x3d4452, 12, 1)
-    if (left12 > 0) cell(2, 2, 0xffbf49, left12, 1)
-  }
   if (bao.level !== null && bao.t - bao.level.at < 2.4) {
     const age = bao.t - bao.level.at
     const title = `niveau ${bao.level.n}`

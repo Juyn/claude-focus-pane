@@ -129,7 +129,7 @@ elements named in `decor-sheet.json`. `python3 scripts/build-sprites.py` bakes t
 module: run it again after changing or adding a sheet (a new cat is a folder, a name in the script's
 `ORDER`, and a value of `PetCoat`). On a terminal the panda does not walk the meadow: it has a world of its own, after the design
 « Univers · Bao le panda » — a bamboo grove by the water at night, fireflies, a panda that rolls to a
-sprout as a ball, eats it, and is rewarded with confetti, a count and a combo; a sprout comes up for
+sprout as a ball, eats it, and is rewarded with confetti and hearts; a sprout comes up for
 each finished todo, at rest it sleeps. On the desktop the panda walks the meadow as the cats do, from
 a sheet that is not a drawing but a program:
 `python3 scripts/draw-panda.py` builds every frame from a few shapes and writes the sheet. Both sizes are drawn in half blocks, one pixel a half cell: a
