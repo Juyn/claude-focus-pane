@@ -1283,8 +1283,6 @@ const SCENE = {
   mote: 0x4a5573,
   bug: 0x9bd45a,
   ember: [0xf2a45b, 0xe2843a, 0xb9622a],
-  swarm: [0xe2843a, 0xf2a45b, 0x4a58c8, 0x8a6f9e, 0x8d8a94, 0xb9622a],
-  star: 0xf7d154,
   spark: [0xf7e27a, 0xfff3c0],
   hurt: [0xff6b7a, 0xc8283a],
 }
@@ -1294,9 +1292,6 @@ type Speck = { x: number; y: number; dx: number; dy: number; age: number; life: 
 
 /** A glyph standing in the scene: a blade of grass, a bloom, a mote. */
 type Prop = { x: number; row: number; glyph: number; color: number }
-
-/** A cloud of squares that crosses the air as one, its squares winking in and out. */
-type Swarm = { x: number; dx: number; cells: { ox: number; oy: number; color: number; beat: number }[] }
 
 /** The scene around the cat: module values, as the cat's own are. */
 const scene = {
@@ -1308,10 +1303,6 @@ const scene = {
   bugX: 0,
   /** Until when, on the scene's clock, the lasagne is out and the cat beside itself. */
   feastUntil: 0,
-  /** Clouds of squares adrift in the air while the feast lasts. */
-  swarms: [] as Swarm[],
-  /** Where the stars twinkle, laid with the swarms. */
-  stars: [] as Prop[],
   /** The props laid for a strip this wide, and that width. */
   props: [] as Prop[],
   laidFor: 0,
@@ -1321,6 +1312,21 @@ const scene = {
 const glyphOf = (text: string) => text.codePointAt(0) ?? 0x20
 
 const isFeasting = () => scene.clock < scene.feastUntil
+
+/** A full-bright hue at `glow`, 0 to 1, over `ground`: a key of the keyboard, lit so far. */
+const lit = (hue: number, glow: number, ground: number) => {
+  const turn = (((hue % 360) + 360) % 360) / 60
+  const rise = 1 - Math.abs((turn % 2) - 1)
+  const [r, g, b] =
+    turn < 1 ? [1, rise, 0] : turn < 2 ? [rise, 1, 0] : turn < 3 ? [0, 1, rise] : turn < 4 ? [0, rise, 1] : turn < 5 ? [rise, 0, 1] : [1, 0, rise]
+  const mix = (channel: number, shift: number) => {
+    const under = (ground >> shift) & 255
+
+    return Math.round(under + (channel * 255 - under) * Math.min(1, glow))
+  }
+
+  return (mix(r, 16) << 16) | (mix(g, 8) << 8) | mix(b, 0)
+}
 
 /** How long a dish of lasagne lasts. */
 const FEAST_MS = 60_000
@@ -1346,37 +1352,6 @@ const DISH_ROWS = LASAGNE.length / 2
 /** Serves the lasagne, or clears the table. */
 const feast = (isServed: boolean) => {
   scene.feastUntil = isServed ? scene.clock + FEAST_MS : 0
-  scene.swarms = []
-  scene.stars = []
-  if (isServed) {
-    // A cloud every twenty columns or so, tall as the air, and stars between.
-    const columns = stage.columns || 80
-    const air = Math.max(3, catRows() - 1)
-    for (let x = 4; x < columns; x += 16 + Math.floor(Math.random() * 10)) {
-      const cells: Swarm['cells'] = []
-      for (let oy = 0; oy < air; oy += 1) {
-        for (let ox = 0; ox < 4; ox += 1) {
-          if (Math.random() < 0.42) {
-            cells.push({
-              ox,
-              oy,
-              color: SCENE.swarm[Math.floor(Math.random() * SCENE.swarm.length)] ?? 0,
-              beat: Math.floor(Math.random() * 6),
-            })
-          }
-        }
-      }
-      scene.swarms.push({ x, dx: (Math.random() < 0.5 ? -1 : 1) * (0.12 + Math.random() * 0.22), cells })
-    }
-    for (let k = 0; k < Math.floor(columns / 7); k += 1) {
-      scene.stars.push({
-        x: Math.floor(Math.random() * columns),
-        row: Math.floor(Math.random() * air),
-        glyph: glyphOf(k % 3 === 0 ? '*' : '✦'),
-        color: SCENE.star,
-      })
-    }
-  }
   actor.isCalled = true
   pet.isAsleep = false
   scene.isDirty = true
@@ -1502,16 +1477,8 @@ const stepScene = (ms: number) => {
     say('Burp.', 3000)
     hasMoved = true
   }
-  if (isFeasting()) {
-    // The swarms drift across the air, each at its own pace, and come round again.
-    const columns = stage.columns || 80
-    for (const one of scene.swarms) {
-      one.x += one.dx
-      if (one.x > columns + 4) one.x = -6
-      else if (one.x < -6) one.x = columns + 4
-    }
-    hasMoved = true
-  }
+  // The wave rolls on every frame of a feast.
+  if (isFeasting()) hasMoved = true
   if (scene.specks.length > 0) {
     for (const one of scene.specks) {
       one.age += ms
@@ -1565,15 +1532,20 @@ const spriteStrip = (columns: number, ground: string, ink: string, mood: string)
     put(Math.round(one.y), Math.round(one.x), one.glyph, shade ?? pen)
   }
 
-  // The air of a feast: stars that twinkle, and the swarms of squares crossing it.
+  // The air of a feast: a wave of lit squares rolling across, as over the keys of
+  // an RGB keyboard — two crests out of step, the hue sweeping with them.
   if (isFeasting()) {
-    const wink = Math.floor(scene.clock / 240)
-    scene.stars.forEach((one, k) => {
-      if ((wink + k) % 4 !== 0) put(one.row, one.x, one.glyph, one.color)
-    })
-    for (const swarm of scene.swarms) {
-      for (const one of swarm.cells) {
-        if ((wink + one.beat) % 6 < 4) put(one.oy, Math.round(swarm.x) + one.ox, glyphOf('■'), one.color)
+    const air = catRows() - 1
+    const middle = (air - 1) / 2
+    for (let x = 0; x < columns; x += 2) {
+      const hue = (x * 5 + scene.clock * 0.14) % 360
+      for (let crest = 0; crest < 2; crest += 1) {
+        const swing = Math.sin(x * (0.16 + crest * 0.05) - scene.clock * (0.005 + crest * 0.002) + crest * 2.1)
+        const peak = middle + swing * middle * 0.9
+        for (let row = 0; row < air; row += 1) {
+          const glow = 1 - Math.abs(row - peak) / 1.7
+          if (glow > 0.12) put(row, x, glyphOf('■'), lit(hue + crest * 150, glow, base))
+        }
       }
     }
   }
