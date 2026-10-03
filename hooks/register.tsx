@@ -4708,8 +4708,9 @@ export const register: Register = on => {
 
     const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
     // What the section takes in rows, for `kept` of its lines: its agents and its planned
-    // tasks unfolded or not; the totals ride in the title row, they take none. An unfolded line takes its avatar's rows and a rule under it,
-    // unless it is the last one shown.
+    // tasks unfolded or not; the totals ride in the title row, they take none. An unfolded line
+    // takes a rule under it, unless it is the last one shown: an agent's four rows (its avatar
+    // beside the title, meta and stats, the bar beneath them), a planned task its avatar's.
     type Fold = { agents: boolean; planned: boolean }
     const agentsRows = ({ agents: isAgentsFolded, planned: isPlannedFolded }: Fold, kept: number) => {
       const shown = lines.slice(0, kept)
@@ -4720,7 +4721,7 @@ export const register: Register = on => {
       const body = shown.reduce((sum, one, at) => {
         if (one.kind === 'agent' ? isAgentsFolded : isPlannedFolded) return sum + 1
 
-        return sum + (one.kind === 'agent' || isAvatar ? 4 : 2) + (at < shown.length - 1 ? 1 : 0)
+        return sum + (one.kind === 'agent' ? 4 : isAvatar ? AVATAR_ROWS : 2) + (at < shown.length - 1 ? 1 : 0)
       }, 0)
 
       return 3 + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)

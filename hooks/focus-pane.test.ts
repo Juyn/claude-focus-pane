@@ -774,8 +774,14 @@ const tallPane = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', bodyR
 
 const OPUS = 'claude-opus-5-5'
 
-/** A docked height where the agents unfold but the planned tasks fold: settled by the probe of the fit. */
-const VARIANT_B_ROWS = 90
+/**
+ * A docked height where the agents unfold but the planned tasks fold: settled by the probe of
+ * the fit (the demo: c below 76 rows, b from 76, a from 90).
+ */
+const VARIANT_B_ROWS = 85
+
+/** The lowest docked height where the demo's five planned tasks unfold too, three rows and a rule each. */
+const VARIANT_A_ROWS = 90
 
 /** A subagent spawned by the model, then one model request of its loop. */
 const launch = async ($: Engine, description: string) => {
@@ -1402,6 +1408,15 @@ test('the shared meter keeps its thin track on the cards above', async ($, on) =
   const pane = await tallPane($)
 
   expect(await pane.find({ text: /^━*─+$/ })).toBeDefined()
+})
+
+test('an unfolded planned task takes its three-row avatar and a rule, no more', async ($, on) => {
+  // At four rows and a rule each, as the agents take, the five planned tasks would need five more.
+  const pane = await demoDock($, on, 100, VARIANT_A_ROWS)
+  const planned = rasterKeys(await pane.drawn()).filter(key => key.startsWith('agent:ava:todo-'))
+
+  expect(planned).toHaveLength(5)
+  expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: VARIANT_A_ROWS } })
 })
 
 test('where the unfolded planned rows do not fit, the agents keep their avatars and the planned fold', async ($, on) => {
