@@ -1080,3 +1080,21 @@ test('the pane redraws each second while an agent runs, and stops once none does
   await clock.advance(3000)
   expect(redraws).toBe(settled)
 })
+
+test('a request of the main loop is none of the agents: nothing is listed, no row made', async ($, on) => {
+  engine(on)
+  let listed = 0
+  on('agent.list', () => {
+    listed += 1
+
+    return { value: [{ id: 'undefined', description: 'Fantôme', type: 'x', status: 'running' }] }
+  })
+  const stream = $.turn.step({ turnId: 'main', index: 0, model: OPUS, effort: 'high', messageCount: 2 })
+  for await (const _chunk of stream) {
+    // Drained.
+  }
+  await stream.result
+
+  expect(listed).toBe(0)
+  expect(await (await tallPane($)).find({ key: 'agents:cost' })).toBeUndefined()
+})
