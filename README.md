@@ -7,6 +7,11 @@ A Claude Code mod: a permanent side pane that keeps the session's context on scr
 - **Cards** — plan progress, context tokens and cost, turns, session time.
 - **Sacred Book** — the bound feature's spec and plan (status, outline, GitHub link) and its mockup.
 - **Todos** — the list the agent's `TodoWrite` wrote.
+- **Agents** — the session's subagents, one row each: tier (from the effort), model, context share, estimated
+  cost and time, and a pixel crab; three cards sum cost, tokens and wall time. Running, finished and planned
+  groups (the planned are the pending tasks, with what each waits for). `r` folds the rows, `t` hides the
+  finished; a short pane folds them by itself, then keeps the first ones and counts the rest. Cost and window
+  are estimates from a price table in `hooks/register.tsx`.
 - **Mockups tab** — one thumbnail per screen of the bound mockup, with an open-in-browser button.
 
 It docks to the right of the transcript only under Claude Code's fullscreen renderer (`/tui fullscreen`,
