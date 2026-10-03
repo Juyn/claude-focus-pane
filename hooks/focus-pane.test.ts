@@ -1142,3 +1142,18 @@ test('when the cards do not fit, one quiet row gives the totals', async ($, on) 
   expect(totals?.text).toMatch(/^coût ≈\$10\.3 · 14\.0M tokens · durée \d\d:\d\d$/)
   expect(await pane.find({ key: 'agents:cost' })).toBeUndefined()
 })
+
+test('the outlines and the todos give way so that every agent keeps a line', async ($, on) => {
+  const pane = await demoDock($, on, 100, 60)
+  const keys: string[] = []
+  const walk = (node: unknown) => {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return
+    keys.push(String(one.props?.key ?? ''))
+    for (const child of one.children ?? []) walk(child)
+  }
+  walk(await pane.drawn())
+
+  expect(keys.filter(key => key.startsWith('agents:row:'))).toHaveLength(3)
+  expect(await pane.find({ key: 'agents:totals' })).toBeDefined()
+})
