@@ -135,7 +135,7 @@ test('the pane draws the plan TodoWrite wrote, with its progress', async ($, on)
   expect(await pane.find({ text: /1\/3/ })).toBeDefined()
 })
 
-test('an empty plan says so rather than drawing nothing', async ($, on) => {
+test('an empty plan draws no PLAN card and no TODOS section', async ($, on) => {
   engine(on)
 
   const pane = await $.ui.mount({
@@ -146,7 +146,10 @@ test('an empty plan says so rather than drawing nothing', async ($, on) => {
     props: PROPS,
   })
 
-  expect(await pane.find({ text: /aucune todo list/ })).toBeDefined()
+  // `aucune todo list` was the caption of the PLAN card, which is gone.
+  expect(await pane.find({ text: /aucune todo list/ })).toBeUndefined()
+  expect(await pane.find({ key: 'card:PLAN' })).toBeUndefined()
+  expect(await pane.find({ text: /TODOS/ })).toBeUndefined()
 })
 
 
@@ -159,7 +162,7 @@ const mounted = ($: Engine, bodyColumns: number) =>
     props: { ...PROPS, bodyColumns },
   })
 
-const CARDS = ['card:PLAN', 'card:CONTEXTE', 'card:TOURS', 'card:TEMPS']
+const CARDS = ['card:COÛT', 'card:CONTEXTE', 'card:TOURS', 'card:TEMPS']
 
 test('one view draws the brief and the four cards, at every width', async ($, on) => {
   engine(on)
@@ -181,8 +184,10 @@ test('the context card prints what the session reports', async ($, on) => {
   const pane = await wide($)
 
   expect(await pane.find({ text: '84.2k' })).toBeDefined()
-  expect(await pane.find({ text: '$1.92' })).toBeDefined()
-  expect(await pane.find({ text: '42% de 200k' })).toBeDefined()
+  expect(await pane.find({ text: '≈$1.92' })).toBeDefined()
+  // The caption `42% de 200k` is gone with the captions: the percentage sits beside the label.
+  expect(await pane.find({ text: '42%' })).toBeDefined()
+  expect(await pane.find({ text: '42% de 200k' })).toBeUndefined()
   expect(await pane.find({ text: '4m' })).toBeDefined()
 })
 
@@ -205,6 +210,57 @@ test('an ansi theme sets no color at all', async ($, on) => {
   const pane = await wide($)
 
   expect((await pane.find({ type: 'Text', text: '◢ U N L O C K E R' }))?.props.color).toBeUndefined()
+})
+
+/** The element children of a drawn node, keyed or not. */
+const kids = (node: unknown) => ((node as Drawn)?.children ?? []) as NonNullable<Drawn>[]
+
+test('the four compact cards: no PLAN, two rows each, the context gauge on the value line', async ($, on) => {
+  engine(on)
+  on('session.usage', () => ({
+    value: { startedAt: 1_700_000_000_000 - 240_000, context: { tokens: 84_210, window: 200_000, percent: 42 }, rateLimits: [], cost: { usd: 1.92 } },
+  }))
+  await $.tool.call({ tool: 'Bash', command: 'cargo test ipc' })
+  const pane = await wide($)
+
+  expect(await pane.find({ key: 'card:PLAN' })).toBeUndefined()
+  expect(await pane.find({ text: /PLAN/ })).toBeUndefined()
+  for (const key of CARDS) {
+    const card = await pane.find({ key })
+    expect(card?.props.borderStyle).toBe('round')
+    // Label row + value row inside the frame: 2 + 2 border rows = 4.
+    expect(kids(card)).toHaveLength(2)
+  }
+  const cost = await pane.find({ key: 'card:COÛT' })
+  expect(kids(kids(cost)[0])[0]?.children?.join('')).toBe('COÛT')
+  expect(kids(cost)[1]?.children?.join('')).toBe('≈$1.92')
+  // Context: the value, then its bar, on the one line; no third row.
+  const context = await pane.find({ key: 'card:CONTEXTE' })
+  const valueLine = kids(context)[1]
+  expect(kids(valueLine)).toHaveLength(2)
+  expect(kids(valueLine)[0]?.children?.join('')).toBe('84.2k')
+  expect(seek(kids(valueLine)[1], node => node.type === 'Text' && /^━+$/.test(String((node.children ?? []).join('')))))
+    .toBeDefined()
+  expect(kids(kids(context)[0])[1]?.children?.join('')).toBe('42%')
+  // Tours: a dot beside the label only during a turn.
+  expect(kids(kids(await pane.find({ key: 'card:TOURS' }))[0])).toHaveLength(1)
+})
+
+test('four cards a row from 56 columns, two a row below', async ($, on) => {
+  engine(on)
+  const rowsAt = async (columns: number) => {
+    const pane = await mounted($, columns)
+    const row = seek(await pane.drawn(), node => kids(node).some(one => one.props?.key === 'card:COÛT'))
+    const count = kids(row).filter(one => String(one.props?.key ?? '').startsWith('card:')).length
+    await pane.unmount()
+
+    return count
+  }
+
+  expect(await rowsAt(70)).toBe(4)
+  expect(await rowsAt(60)).toBe(4)
+  expect(await rowsAt(52)).toBe(2)
+  expect(await rowsAt(48)).toBe(2)
 })
 
 test('the pane is always as tall as its window', async ($, on) => {
@@ -279,7 +335,7 @@ test('spec binds a Sacred Book feature and demo fills the plan from it', async (
 
   await $.command.run({ command: 'mission', args: 'demo', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   expect(await pane.find({ text: /● R3/ })).toBeDefined()
-  expect(await pane.find({ text: '29%' })).toBeDefined()
+  expect(await pane.find({ text: /^\d+\/\d+$/ })).toBeDefined()
 })
 
 test('no bound feature draws no Sacred Book card', async ($, on) => {
@@ -665,7 +721,8 @@ test('on the desktop the cat and its meadow are one self-playing Svg', async ($,
   // The meadow is in the same picture: the decor sheet, its ground and its grass.
   expect(sources.find(one => /@keyframes play/.test(one))).toMatch(/@keyframes k-grass_/)
   expect(sources.find(one => /@keyframes play/.test(one))).toMatch(/@keyframes k-beetle/)
-  expect(sources.filter(one => /viewBox="0 0 100 3"/.test(one))).toHaveLength(2)
+  // One small Svg bar there too: the context gauge, now that PLAN has no meter.
+  expect(sources.filter(one => /viewBox="0 0 100 3"/.test(one))).toHaveLength(1)
   expect(await pane.find({ type: 'Raster' })).toBeUndefined()
 })
 
@@ -955,15 +1012,15 @@ test('a short pane folds the agents, then keeps the running ones and counts the 
   }
 
   // With the cat in, there is no room for the finished ones, and the running three stay.
-  const crowded = await tallPane($, 'terminal', 24)
+  const crowded = await tallPane($, 'terminal', 22)
   expect(await crowded.find({ text: /^\+ \d+ autres$/ })).toBeDefined()
   expect(await crowded.find({ text: /Agent 8/ })).toBeDefined()
-  expect(await crowded.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 24 } })
+  expect(await crowded.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 22 } })
   await crowded.unmount()
 
   await petCommand($, 'off')
-  const pane = await tallPane($, 'terminal', 24)
-  expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 24 } })
+  const pane = await tallPane($, 'terminal', 22)
+  expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 22 } })
   expect(rasterKeys(await pane.drawn()).filter(key => key.startsWith('agent:ava:'))).toEqual([])
   expect(await pane.find({ text: /Agent 8/ })).toBeDefined()
   expect(await pane.find({ text: /^\+ \d+ autres$/ })).toBeDefined()

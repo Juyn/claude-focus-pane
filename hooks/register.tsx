@@ -3580,45 +3580,59 @@ const heading = ({ Box, Text }: Elements, tone: Tone, label: string, aside: stri
   </Box>
 )
 
-type Figure = {
+type Stat = {
+  key: string
   label: string
-  aside: string
+  /** Quiet, on the right of the label: a percentage, a live dot. */
+  aside?: string
   value: string
-  /** 0 to 1, or null for a card with no meter. */
-  ratio: number | null
-  color: string | undefined
-  caption: string
+  /** A meter filling the rest of the value's line: a ratio from 0 to 1 and its color. */
+  gauge?: { ratio: number; color: string | undefined }
 }
 
-/** One figure, large, with its meter and what it counts: the row of four. */
-const card = (parts: Elements, tone: Tone, one: Figure, width: number | string, bar: number) => {
+/**
+ * The compact figure, four rows with its frame: the label (and an aside) in grey, the value
+ * in bold under it, and when asked a meter on the value's own line. In cells the widths add
+ * up exactly; as a share of the row (`width` a string) the card may give.
+ */
+const stat = (parts: Elements, tone: Tone, one: Stat, width: number | string) => {
   const { Box, Text } = parts
+  const isCells = typeof width === 'number'
+  // The frame and the padding take 4 cells, the value and a space the rest of the line.
+  const bar = isCells ? Math.max(1, width - 4 - one.value.length - 1) : 14
 
   return (
     <Box
-      key={`card:${one.label}`}
+      key={one.key}
       flexDirection="column"
       width={width}
-      // In cells the widths add up exactly; as a share of the row, it may give.
-      flexGrow={typeof width === 'string' ? 1 : 0}
-      flexShrink={typeof width === 'string' ? 1 : 0}
+      flexGrow={isCells ? 0 : 1}
+      flexShrink={isCells ? 0 : 1}
       borderStyle="round"
       borderColor={tone.frame}
       backgroundColor={tone.card}
       paddingX={1}
     >
-      {heading(parts, tone, one.label, one.aside)}
-      <Text bold color={tone.text} backgroundColor={tone.card}>
-        {one.value}
-      </Text>
-      {one.ratio === null ? (
-        <Text backgroundColor={tone.card}> </Text>
+      <Box flexDirection="row" width="100%" justifyContent="space-between">
+        <Text {...quiet(tone, tone.card)} wrap="truncate-end">
+          {one.label}
+        </Text>
+        {one.aside !== undefined && one.aside !== '' && <Text {...quiet(tone, tone.card)}>{one.aside}</Text>}
+      </Box>
+      {one.gauge === undefined ? (
+        <Text bold color={tone.text} backgroundColor={tone.card} wrap="truncate-end">
+          {one.value}
+        </Text>
       ) : (
-        meter(parts, tone, one.ratio, bar, one.color)
+        <Box flexDirection="row" width="100%" columnGap={1}>
+          <Text bold color={tone.text} backgroundColor={tone.card}>
+            {one.value}
+          </Text>
+          <Box flexGrow={1} flexShrink={1}>
+            {meter(parts, tone, one.gauge.ratio, bar, one.gauge.color)}
+          </Box>
+        </Box>
       )}
-      <Text {...quiet(tone, tone.card)} wrap="truncate-end">
-        {one.caption}
-      </Text>
     </Box>
   )
 }
@@ -4479,45 +4493,25 @@ export const register: Register = on => {
     )
 
     // -------------------------------------------------------------- the cards
-    const figures: Figure[] = [
+    const stats: Stat[] = [
+      { key: 'card:COÛT', label: 'COÛT', value: spent.usd === null ? '—' : dollars(spent.usd) },
       {
-        label: 'PLAN',
-        aside: plan.length > 0 ? `${done}/${plan.length}` : '',
-        value: plan.length > 0 ? `${Math.round((done / plan.length) * 100)}%` : '—',
-        ratio: plan.length > 0 ? done / plan.length : 0,
-        color: tone.ok,
-        caption: plan.length > 0 ? 'todos terminées' : 'aucune todo list',
-      },
-      {
+        key: 'card:CONTEXTE',
         label: 'CONTEXTE',
-        aside: spent.usd === null ? '' : `$${spent.usd.toFixed(2)}`,
+        aside: spent.percent === null ? '' : `${Math.round(spent.percent)}%`,
         value: spent.tokens === null ? '—' : compact(spent.tokens),
-        ratio: spent.percent === null ? 0 : spent.percent / 100,
-        color: spent.percent !== null && spent.percent >= 80 ? tone.bad : tone.mark,
-        caption:
-          spent.percent === null || spent.window === 0
-            ? 'tokens en contexte'
-            : `${Math.round(spent.percent)}% de ${compact(spent.window)}`,
+        gauge: {
+          ratio: spent.percent === null ? 0 : spent.percent / 100,
+          color: spent.percent !== null && spent.percent >= 80 ? tone.bad : tone.mark,
+        },
       },
-      {
-        label: 'TOURS',
-        aside: state.isRunning ? 'EN COURS' : '',
-        value: String(state.count + (state.isRunning ? 1 : 0)),
-        ratio: null,
-        color: undefined,
-        caption: turnClock === null ? 'aucun tour joué' : `${state.isRunning ? 'ce tour' : 'dernier'} ${turnClock}`,
-      },
-      {
-        label: 'TEMPS',
-        aside: 'SESSION',
-        value: spent.startedAt === null ? '—' : span(now - spent.startedAt),
-        ratio: null,
-        color: undefined,
-        caption: `${rows.length} appel${rows.length > 1 ? 's' : ''} d'outil`,
-      },
+      { key: 'card:TOURS', label: 'TOURS', aside: state.isRunning ? '●' : '', value: String(state.count + (state.isRunning ? 1 : 0)) },
+      { key: 'card:TEMPS', label: 'TEMPS', value: spent.startedAt === null ? '—' : span(now - spent.startedAt) },
     ]
     const isWide = room >= 84
-    const perRow = isWide ? 4 : 2
+    // Four to a row from 56 cells, else two: 4 rows or 8.
+    const isFour = room >= 56
+    const perRow = isFour ? 4 : 2
     const cardWidth = Math.floor((room - (perRow - 1)) / perRow)
     // Off the terminal a width is no count of cells, and the font is not a grid:
     // the blocks there take a share of their row and flex, instead of a number.
@@ -4526,12 +4520,10 @@ export const register: Register = on => {
     const cards = (
       <Box flexDirection="column" width="100%">
         {[0, perRow]
-          .filter(from => from < figures.length)
+          .filter(from => from < stats.length)
           .map(from => (
             <Box flexDirection="row" width="100%" columnGap={1}>
-              {figures.slice(from, from + perRow).map(one =>
-                card(parts, tone, one, isCells ? cardWidth : cardShare, isCells ? Math.max(4, cardWidth - 4) : 14),
-              )}
+              {stats.slice(from, from + perRow).map(one => stat(parts, tone, one, isCells ? cardWidth : cardShare))}
             </Box>
           ))}
       </Box>
@@ -4608,7 +4600,7 @@ export const register: Register = on => {
       return (
         1 + // header
         2 + briefLines(seated.mission) + briefLines(seated.summary) +
-        (isWide ? 6 : 12) + // cards
+        (isFour ? 4 : 8) + // cards
         book +
         list +
         petRows +
@@ -4893,24 +4885,8 @@ export const register: Register = on => {
       crew.length === 0
         ? 0
         : (isAllOver ? Math.max(...crew.map(one => one.endedAt ?? 0)) : now) - Math.min(...crew.map(one => one.startedAt))
-    const agentCard = (key: string, label: string, value: string) => (
-      <Box
-        key={key}
-        flexDirection="column"
-        width={isCells ? Math.floor((inner - 2) / 3) : '32%'}
-        flexGrow={isCells ? 0 : 1}
-        flexShrink={isCells ? 0 : 1}
-        borderStyle="round"
-        borderColor={tone.frame}
-        backgroundColor={tone.card}
-        paddingX={1}
-      >
-        <Text {...quiet(tone, tone.card)}>{label}</Text>
-        <Text bold color={tone.text} backgroundColor={tone.card} wrap="truncate-end">
-          {value}
-        </Text>
-      </Box>
-    )
+    const agentCard = (key: string, label: string, value: string) =>
+      stat(parts, tone, { key, label, value }, isCells ? Math.floor((inner - 2) / 3) : '32%')
     const agentsBlock = (
       <Box
         key="agents"
