@@ -7,9 +7,10 @@ import type {
   SvgProps,
   TextProps,
   Timer,
+  TurnUsage,
 } from 'claude-code'
 
-import type { Doc, Feature, FeedRow, Gallery, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
+import type { AgentRow, AgentsView, Doc, Effort, Feature, FeedRow, Gallery, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
 
@@ -51,6 +52,8 @@ const focus = atom({ plugin: 'focus-pane', key: 'focus' } as const, {
 })
 const todos = atom({ plugin: 'focus-pane', key: 'todos' } as const, [])
 const feed = atom({ plugin: 'focus-pane', key: 'feed' } as const, [])
+const agents = atom({ plugin: 'focus-pane', key: 'agents' } as const, [])
+const agentsView = atom({ plugin: 'focus-pane', key: 'agentsView' } as const, { isFolded: false, isDoneHidden: false })
 const usage = atom({ plugin: 'focus-pane', key: 'usage' } as const, {
   tokens: null,
   window: 0,
@@ -2957,6 +2960,8 @@ type Tone = {
   chipBackground: string | undefined
   chipText: string | undefined
   track: string | undefined
+  /** The color of an agent's tier word and of its meter. */
+  tiers: Record<'heavy' | 'careful' | 'medium' | 'light', string | undefined>
   badges: Record<Family, Badge>
 }
 
@@ -2979,6 +2984,7 @@ const TONES: Record<Skin, Tone> = {
     chipBackground: '#222a42',
     chipText: '#aab6dd',
     track: '#2a3350',
+    tiers: { heavy: '#ff5a3c', careful: '#f0a020', medium: '#4a9cff', light: '#3ecf8e' },
     badges: {
       shell: { background: '#12306b', text: '#7fb0ff' },
       edit: { background: '#2e2466', text: '#b7a4ff' },
@@ -3002,6 +3008,7 @@ const TONES: Record<Skin, Tone> = {
     chipBackground: '#e3e9fa',
     chipText: '#33407a',
     track: '#dbe1f2',
+    tiers: { heavy: '#d8401f', careful: '#c47a00', medium: '#1f6fd6', light: '#0a8f5a' },
     badges: {
       shell: { background: '#dbe6ff', text: '#173cc1' },
       edit: { background: '#e8e1ff', text: '#5a3fc0' },
@@ -3026,6 +3033,7 @@ const TONES: Record<Skin, Tone> = {
     chipBackground: undefined,
     chipText: undefined,
     track: undefined,
+    tiers: { heavy: undefined, careful: undefined, medium: undefined, light: undefined },
     badges: { shell: PLAIN, edit: PLAIN, read: PLAIN, agent: PLAIN, other: PLAIN },
   },
 }
@@ -3109,6 +3117,314 @@ const span = (ms: number) => {
 
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
 }
+
+// ----------------------------------------------------------------- the agents
+
+type Tier = 'heavy' | 'careful' | 'medium' | 'light'
+
+/** How many subagent rows the pane remembers, and the fewest rows its section keeps. */
+const AGENTS_KEPT = 30
+const AGENTS_LEAST = 4
+
+const TIERS: Record<string, Tier> = { max: 'heavy', xhigh: 'heavy', high: 'careful', medium: 'medium', low: 'light' }
+
+/** How hard an agent thinks, as a word: a number or no effort at all has none. */
+const tierOf = (effort: Effort | null): Tier | null => (typeof effort === 'string' ? (TIERS[effort] ?? null) : null)
+
+/** Dollars per million tokens. */
+type Price = { input: number; output: number; cacheRead: number; cacheWrite: number }
+
+// Estimates: a cache write is priced at the 1 h rate, 2 × input, as Claude Code sessions pay it.
+const OPUS_5_5: Price = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 }
+const PRICES: readonly (readonly [string, Price])[] = [
+  ['fable', { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 20 }],
+  ['opus-5-5', OPUS_5_5],
+  ['opus', { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 10 }],
+  ['sonnet-5', { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 4 }],
+  ['sonnet', { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 6 }],
+  ['haiku', { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 2 }],
+]
+
+const tokensOf = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+
+/** What one request cost, by the table; a model it does not know is priced as Opus 5.5. */
+const stepCost = (usage: TurnUsage, model: string) => {
+  const price = PRICES.find(([name]) => model.includes(name))?.[1] ?? OPUS_5_5
+
+  return (
+    (tokensOf(usage.input_tokens) * price.input +
+      tokensOf(usage.output_tokens) * price.output +
+      tokensOf(usage.cache_read_input_tokens) * price.cacheRead +
+      tokensOf(usage.cache_creation_input_tokens) * price.cacheWrite) /
+    1e6
+  )
+}
+
+/** The size of a request: every token it carried or wrote. */
+const stepSize = (usage: TurnUsage) =>
+  tokensOf(usage.input_tokens) +
+  tokensOf(usage.output_tokens) +
+  tokensOf(usage.cache_read_input_tokens) +
+  tokensOf(usage.cache_creation_input_tokens)
+
+/** The context window an estimate divides by. */
+const windowOf = (model: string) => (model.includes('haiku') ? 200_000 : 1_000_000)
+
+const capital = (word: string) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`
+
+/** `claude-opus-5-5` as Opus 5.5, `opus` as Opus; any other id as it is. */
+const modelName = (id: string) => {
+  const bare = id.replace(/\[.*\]$/, '').replace(/-\d{8}$/, '')
+  const hit = bare.match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?$/)
+  if (hit) return `${capital(hit[1] ?? '')} ${hit[2]}${hit[3] === undefined ? '' : `.${hit[3]}`}`
+
+  return /^[a-z]+$/.test(bare) ? capital(bare) : id
+}
+
+/** An estimated cost: two decimals under ten dollars, one above. */
+const dollars = (usd: number) => `≈$${usd.toFixed(usd < 10 ? 2 : 1)}`
+
+const blankAgent = (id: string, title: string, type: string, model: string | null, now: number): AgentRow => ({
+  id,
+  title,
+  type,
+  model,
+  effort: null,
+  status: 'running',
+  startedAt: now,
+  endedAt: null,
+  context: 0,
+  tokens: 0,
+  usd: 0,
+})
+
+/** Keeps the newest rows: the oldest finished one goes first, else the oldest. */
+const trimAgents = (rows: AgentRow[]) => {
+  const kept = [...rows]
+  while (kept.length > AGENTS_KEPT) {
+    const at = kept.findIndex(one => one.status !== 'running')
+    kept.splice(Math.max(0, at), 1)
+  }
+
+  return kept
+}
+
+/** A row with one more request taken in: its size is its context, its tokens and cost add up. */
+const charge = (row: AgentRow, usage: TurnUsage | null | undefined): AgentRow => {
+  if (!usage) return row
+  const size = stepSize(usage)
+
+  return { ...row, context: size, tokens: row.tokens + size, usd: row.usd + stepCost(usage, usage.model || row.model || '') }
+}
+
+/** Ids the engine does not list (a workflow's agents, a fork's): never looked up twice. */
+const strangers = new Set<string>()
+
+/** Redraws each second while an agent runs: a module value, so a reload drops it with its timer. */
+let agentTicker: Timer | undefined
+
+/** Starts or stops the ticker after each write of the rows. */
+const tick = async ($: EngineInterface) => {
+  try {
+    agentTicker?.cancel()
+  } catch {
+    // A timer of an engine long gone.
+  }
+  agentTicker = undefined
+  if ((await read($, agents)).some(one => one.status === 'running')) {
+    agentTicker = $.clock.every(1000, () => {
+      $.ui.invalidate('ui.render')
+    })
+  }
+}
+
+/** A request of a subagent's loop went by: its row is made if the engine lists it, else it is left alone. */
+const noteStep = async (
+  $: EngineInterface,
+  id: string,
+  step: { model: string; effort?: Effort },
+  usage: TurnUsage | null,
+) => {
+  const now = await $.clock.now()
+  if (!(await read($, agents)).some(one => one.id === id)) {
+    if (strangers.has(id)) return
+    const listed = (await $.agent.list()).find(one => one.id === id)
+    if (listed === undefined) {
+      strangers.add(id)
+
+      return
+    }
+    await update($, agents, was =>
+      was.some(one => one.id === id)
+        ? was
+        : trimAgents([...was, blankAgent(id, listed.description || listed.type, listed.type, null, now)]),
+    )
+  }
+  await update($, agents, was =>
+    was.map(one =>
+      one.id !== id
+        ? one
+        : charge(
+            { ...one, status: 'running', endedAt: null, effort: step.effort ?? one.effort, model: usage?.model ?? step.model },
+            usage,
+          ),
+    ),
+  )
+  await tick($)
+}
+
+/** A subagent's turn ended: its row closes, and takes the turn's usage if no step ever gave it one. */
+const endAgent = async ($: EngineInterface, id: string, reason: string, usage: TurnUsage | undefined) => {
+  const now = await $.clock.now()
+  await update($, agents, was =>
+    was.map(one =>
+      one.id !== id
+        ? one
+        : {
+            ...(one.tokens === 0 ? charge(one, usage) : one),
+            status: reason === 'answer' ? 'completed' : 'failed',
+            endedAt: now,
+          },
+    ),
+  )
+  await tick($)
+}
+
+/** The engine's own list is the truth: a row still running whose agent is over is closed. */
+const reconcileAgents = async ($: EngineInterface) => {
+  if (!(await read($, agents)).some(one => one.status === 'running')) return
+  const listed = await $.agent.list()
+  const now = await $.clock.now()
+  await update($, agents, was =>
+    was.map(one => {
+      const seen = listed.find(other => other.id === one.id)
+      if (one.status !== 'running' || seen === undefined || seen.status === 'running' || seen.status === 'pending') return one
+
+      return { ...one, status: seen.status === 'completed' ? 'completed' : 'failed', endedAt: now }
+    }),
+  )
+  await tick($)
+}
+
+/** Task ids as a tool call spells them. */
+const asIds = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.flatMap(one => (typeof one === 'string' || typeof one === 'number' ? [String(one).trim()] : [])).filter(Boolean)
+    : []
+
+const joined = (was: string[] | undefined, more: string[]) => [...new Set([...(was ?? []), ...more])]
+
+/**
+ * The crab, 10 by 6 pixels, two a terminal row. `H` hat, `B` brim, `A` and `S` a
+ * trinket and its stem, `O` body, `K` eyes, `.` nothing.
+ */
+const AVATAR = ['..HHHHHH.A', '.BBBBBBBBS', '.OOOOOOOO.', 'OOKOOOOKOO', '.OOOOOOOO.', '.O.O..O.O.'] as const
+const AVATAR_COLUMNS = 10
+const AVATAR_ROWS = 3
+const CRAB: Record<string, string> = { O: '#d97757', K: '#1f1a17' }
+const HATS: Record<Tier | 'none', Record<string, string>> = {
+  heavy: { H: '#7a4a2a', B: '#5c3720', A: '#5aa9ff', S: '#9aa0a6' },
+  careful: { H: '#f2c230', B: '#d99a00' },
+  medium: { H: '#c8ccd4', B: '#3f6fd8' },
+  light: { H: '#2fa66a', B: '#1f7a4c', A: '#f2efe8', S: '#9aa0a6' },
+  none: { H: '#8a7f6a', B: '#6e6553' },
+}
+
+/** `hex` and `toward` blended, `share` of the way. */
+const mixHex = (hex: string, toward: string, share: number) => {
+  const mixed = [16, 8, 0].map(shift => {
+    const one = (rgb(hex) >> shift) & 255
+    const other = (rgb(toward) >> shift) & 255
+
+    return Math.round(one + (other - one) * share)
+  })
+
+  return `#${mixed.map(channel => channel.toString(16).padStart(2, '0')).join('')}`
+}
+
+/** The crab's pixels: a color, or undefined for the ground. A planned row's fade toward it. */
+const avatarPixels = (tier: Tier | null, isPlanned: boolean, ground: string | undefined) => {
+  const palette = { ...CRAB, ...HATS[tier ?? 'none'] }
+
+  return AVATAR.map(row =>
+    [...row].map(letter => {
+      const hex = palette[letter]
+
+      return hex !== undefined && isPlanned && ground !== undefined ? mixHex(hex, ground, 0.5) : hex
+    }),
+  )
+}
+
+/** The crab as Raster cells: half blocks, the lower pixel the foreground. */
+const avatarCells = (pixels: (string | undefined)[][], ground: string | undefined) => {
+  const base = ground === undefined ? 0x01000000 : rgb(ground)
+  const words = new Uint32Array(AVATAR_COLUMNS * AVATAR_ROWS * 3)
+  for (let row = 0; row < AVATAR_ROWS; row += 1) {
+    for (let x = 0; x < AVATAR_COLUMNS; x += 1) {
+      const cell = (row * AVATAR_COLUMNS + x) * 3
+      const top = pixels[row * 2]?.[x]
+      const bottom = pixels[row * 2 + 1]?.[x]
+      words[cell] = LOWER_HALF
+      words[cell + 1] = bottom === undefined ? base : rgb(bottom)
+      words[cell + 2] = top === undefined ? base : rgb(top)
+    }
+  }
+
+  return toBase64(new Uint8Array(words.buffer))
+}
+
+/** The crab as a vector picture, for a surface that draws one. */
+const avatarSvg = (pixels: (string | undefined)[][]) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 6" width="40" height="24" shape-rendering="crispEdges">` +
+  pixels
+    .flatMap((row, y) =>
+      row.flatMap((hex, x) => (hex === undefined ? [] : [`<rect x="${x}" y="${y}" width="1" height="1" fill="${hex}"/>`])),
+    )
+    .join('') +
+  '</svg>'
+
+/** A session's worth of agents made up whole, for showing the pane full. */
+const demoAgents = (now: number): AgentRow[] => [
+  {
+    id: 'demo-1',
+    title: 'Conformer api-v2 au contrat R3',
+    type: 'general-purpose',
+    model: 'claude-opus-5-5',
+    effort: 'xhigh',
+    status: 'running',
+    startedAt: now - 201_000,
+    endedAt: null,
+    context: 177_000,
+    tokens: 1_240_000,
+    usd: 1.65,
+  },
+  {
+    id: 'demo-2',
+    title: 'Contrat BFF et SDK du relevé',
+    type: 'general-purpose',
+    model: 'claude-opus-5-5',
+    effort: 'high',
+    status: 'completed',
+    startedAt: now - 1_500_000,
+    endedAt: now - 435_000,
+    context: 270_000,
+    tokens: 9_700_000,
+    usd: 6.26,
+  },
+  {
+    id: 'demo-3',
+    title: 'Pact du relevé de compte',
+    type: 'general-purpose',
+    model: 'claude-opus-5-5',
+    effort: 'high',
+    status: 'completed',
+    startedAt: now - 700_000,
+    endedAt: now - 280_000,
+    context: 120_000,
+    tokens: 3_100_000,
+    usd: 2.4,
+  },
+]
 
 // ------------------------------------------------------------------ the parts
 
@@ -3375,10 +3691,13 @@ const demoTodos = (bound: Feature | null): Todo[] => {
       ? steps.slice(0, 8)
       : ['Lire la spec', 'Écrire le contrat BFF', 'Régénérer le SDK', 'Conformer api-v2', 'Brancher le front', 'Recette staging']
 
+  // Two of the waiting tasks hang on others, so the planned rows say what they wait for.
   return all.map((content, at) => ({
+    id: String(at + 1),
     content,
     status: at < 2 ? 'completed' : at === 2 ? 'in_progress' : 'pending',
     activeForm: content,
+    ...(at === 4 ? { blockedBy: ['3'] } : at === 5 ? { blockedBy: ['3', '5'] } : {}),
   }))
 }
 
@@ -3497,7 +3816,8 @@ export const register: Register = on => {
     // A reload lands in the middle of a turn as well as between two: the turn
     // atom outlives it and says which, where a fresh module would guess rest.
     pace($, (await read($, turn)).isRunning)
-
+    // The rows outlive a reload, the timer does not.
+    await tick($).catch(() => undefined)
 
     const branch = await $.process
       .run(['git', 'branch', '--show-current'], { cwd: await $.session.cwd() })
@@ -3608,6 +3928,8 @@ export const register: Register = on => {
       await update($, todos, () => fake)
       const now = await $.clock.now()
       await update($, feed, () => demoFeed(now))
+      await update($, agents, () => demoAgents(now))
+      await tick($).catch(() => undefined)
       await update($, focus, was => ({
         ...was,
         isDismissed: false,
@@ -3708,8 +4030,45 @@ export const register: Register = on => {
     }
 
     pace($, true)
+    if (!(e as { agentId?: unknown }).agentId) await reconcileAgents($).catch(() => undefined)
 
     return next(e)
+  })
+
+  // A subagent started: its row is made as soon as the engine gives it an id.
+  on('agent.spawn', async ($, e, next) => {
+    const ran = await next(e)
+    try {
+      const started = ran.deny === undefined ? ran : null
+      if (started?.agentId) {
+        const id = started.agentId
+        const now = await $.clock.now()
+        const title = e.description || e.subagentType
+        await update($, agents, was =>
+          was.some(one => one.id === id)
+            ? was.map(one => (one.id === id ? { ...one, title, type: e.subagentType, model: one.model ?? started.model } : one))
+            : trimAgents([...was, blankAgent(id, title, e.subagentType, started.model, now)]),
+        )
+        await tick($)
+      }
+    } catch {
+      // Tracking an agent never gets in the spawn's way.
+    }
+
+    return ran
+  })
+
+  // Each request of a subagent's loop: its context, tokens and cost grow.
+  on('turn.step', async function* ($, e, next) {
+    if (!e.agentId) return yield* next(e)
+    const ran = yield* next(e)
+    try {
+      await noteStep($, e.agentId, e, ran.usage)
+    } catch {
+      // Tracking an agent never gets in a step's way.
+    }
+
+    return ran
   })
 
   on('tool.call', async ($, e, next) => {
@@ -3789,27 +4148,40 @@ export const register: Register = on => {
     if (e.agentId) return ran
     const told = ran as { isError?: unknown; result?: { success?: unknown } }
     if (told.isError === true || told.result?.success === false) return ran
-    const args = e as unknown as { taskId?: unknown; subject?: unknown; activeForm?: unknown; status?: unknown }
+    const args = e as unknown as {
+      taskId?: unknown
+      subject?: unknown
+      activeForm?: unknown
+      status?: unknown
+      addBlockedBy?: unknown
+      addBlocks?: unknown
+    }
     const id = asText(args.taskId)
     if (!id) return ran
     if (args.status === 'completed') feel('♪')
+    const blockers = asIds(args.addBlockedBy)
+    const blocked = asIds(args.addBlocks)
 
     await update($, todos, was =>
       args.status === 'deleted'
         ? was.filter(one => one.id !== id)
-        : was.map(one =>
-            one.id !== id
-              ? one
-              : {
-                  ...one,
-                  content: asText(args.subject) || one.content,
-                  activeForm: asText(args.activeForm) || asText(args.subject) || one.activeForm,
-                  status:
-                    args.status === 'pending' || args.status === 'in_progress' || args.status === 'completed'
-                      ? args.status
-                      : one.status,
-                },
-          ),
+        : was.map(one => {
+            // This task gains the blockers it was given, and is a blocker of the ones it blocks.
+            const gains = [...(one.id === id ? blockers : []), ...(one.id !== undefined && one.id !== id && blocked.includes(one.id) ? [id] : [])]
+            const waits = gains.length > 0 ? { blockedBy: joined(one.blockedBy, gains) } : {}
+            if (one.id !== id) return gains.length > 0 ? { ...one, ...waits } : one
+
+            return {
+              ...one,
+              ...waits,
+              content: asText(args.subject) || one.content,
+              activeForm: asText(args.activeForm) || asText(args.subject) || one.activeForm,
+              status:
+                args.status === 'pending' || args.status === 'in_progress' || args.status === 'completed'
+                  ? args.status
+                  : one.status,
+            }
+          }),
     )
 
     return ran
@@ -3831,7 +4203,9 @@ export const register: Register = on => {
         const status: Todo['status'] =
           row.status === 'in_progress' || row.status === 'completed' ? row.status : 'pending'
 
-        return [{ id, content, status, activeForm: was.find(old => old.id === id)?.activeForm ?? content }]
+        const blockedBy = Array.isArray(row.blockedBy) ? { blockedBy: asIds(row.blockedBy) } : {}
+
+        return [{ id, content, status, activeForm: was.find(old => old.id === id)?.activeForm ?? content, ...blockedBy }]
       }),
     )
 
@@ -3840,7 +4214,11 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId) return ran
+    if (e.agentId) {
+      await endAgent($, e.agentId, e.reason, e.usage).catch(() => undefined)
+
+      return ran
+    }
 
     pace($, false)
     await update($, turn, was => ({
@@ -3854,6 +4232,7 @@ export const register: Register = on => {
       was.map(one => (one.ms === null ? { ...one, ms: 0, isError: e.isAborted } : one)),
     )
     await meterUsage($).catch(() => undefined)
+    await reconcileAgents($).catch(() => undefined)
 
     if (!e.isAborted && e.answer.trim()) {
       quip($, `L'agent vient de finir son tour. Sa conclusion :\n${e.answer.trim().slice(0, 400)}`)
@@ -3926,6 +4305,10 @@ export const register: Register = on => {
       void loadGallery($).catch(() => undefined)
     } else if (kind === 'gallery' && verb === 'back') {
       await $.ui.open({ id: PANE, title: 'Focus', focus: true }).catch(() => undefined)
+    } else if (kind === 'agents' && verb === 'fold') {
+      await update($, agentsView, was => ({ ...was, isFolded: !was.isFolded }))
+    } else if (kind === 'agents' && verb === 'done') {
+      await update($, agentsView, was => ({ ...was, isDoneHidden: !was.isDoneHidden }))
     }
 
     if (kind === 'design' && verb === 'open') {
@@ -3952,6 +4335,8 @@ export const register: Register = on => {
     const seated: Focus = await read($, focus)
     const plan: Todo[] = await read($, todos)
     const rows: FeedRow[] = await read($, feed)
+    const crew: AgentRow[] = await read($, agents)
+    const view: AgentsView = await read($, agentsView)
     const state: TurnState = await read($, turn)
     const spent: Usage = await read($, usage)
     const bound: Feature | null = await read($, feature)
@@ -4167,7 +4552,8 @@ export const register: Register = on => {
 
     let outlines = OUTLINE_SHOWN
     let todosKept = plan.length
-    const isOver = () => rowsOf(outlines, todosKept) > tall
+    // The agents' section keeps a few rows of its own before anything else gives way.
+    const isOver = () => rowsOf(outlines, todosKept) + AGENTS_LEAST > tall
     while (isOver() && outlines > OUTLINE_LEAST) outlines -= 1
     while (isOver() && todosKept > TODOS_LEAST) todosKept -= 1
 
@@ -4218,6 +4604,265 @@ export const register: Register = on => {
         {isCut && (
           <Text {...quiet(tone, tone.card)}>{`   + ${plan.length - todosSeen.length} autres étapes`}</Text>
         )}
+      </Box>
+    )
+
+
+    // ------------------------------------------------------------- the agents
+    type Line = { kind: 'agent'; row: AgentRow } | { kind: 'todo'; todo: Todo; rank: string }
+    // Newest first; the same moment, the one spawned last.
+    const newest = (a: { at: number; time: number }, b: { at: number; time: number }) => b.time - a.time || b.at - a.at
+    const runningL: Line[] = crew
+      .map((row, at) => ({ row, at, time: row.startedAt }))
+      .filter(one => one.row.status === 'running')
+      .sort(newest)
+      .map(one => ({ kind: 'agent', row: one.row }))
+    const doneL: Line[] = crew
+      .map((row, at) => ({ row, at, time: row.endedAt ?? row.startedAt }))
+      .filter(one => one.row.status !== 'running')
+      .sort(newest)
+      .map(one => ({ kind: 'agent', row: one.row }))
+    const plannedL: Line[] = plan.flatMap((todo, at): Line[] =>
+      todo.status === 'pending' ? [{ kind: 'todo', todo, rank: todo.id ?? String(at + 1) }] : [],
+    )
+    const lines: Line[] = [...runningL, ...(view.isDoneHidden ? [] : doneL), ...plannedL]
+    const isEmpty = crew.length === 0 && plannedL.length === 0
+    const hasCards = crew.length > 0
+
+    // What the section takes in rows, for `kept` of its lines, folded or not.
+    const agentsRows = (isFolded: boolean, kept: number) => {
+      const shown = lines.slice(0, kept)
+      const titles =
+        (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
+        (doneL.length > 0 ? 1 : 0) +
+        (shown.some(one => one.kind === 'todo') ? 1 : 0)
+      const body = isFolded
+        ? shown.length
+        : shown.reduce((sum, one) => sum + (one.kind === 'agent' ? 4 : 3), 0) + Math.max(0, shown.length - 1)
+
+      return 3 + (hasCards ? 4 : 0) + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)
+    }
+
+    // With the rows left: as they are, else one line each, else the first ones and a count.
+    const budget = tall - rowsOf(outlines, todosKept)
+    let isFolded = view.isFolded
+    let kept = lines.length
+    if (!isFolded && agentsRows(false, kept) > budget) isFolded = true
+    while (kept > 0 && agentsRows(isFolded, kept) > budget) kept -= 1
+    const shown = lines.slice(0, kept)
+
+    const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
+    const avatar = (key: string, tier: Tier | null, isPlanned: boolean) => {
+      const pixels = avatarPixels(tier, isPlanned, tone.card)
+
+      return (
+        <Box flexShrink={0} width={isCells ? AVATAR_COLUMNS : undefined}>
+          {Raster !== undefined ? (
+            <Raster key={key} columns={AVATAR_COLUMNS} rows={AVATAR_ROWS} cells={avatarCells(pixels, tone.card)} />
+          ) : (
+            Svg !== undefined && <Svg source={avatarSvg(pixels)} alt="agent" width={40} height={24} />
+          )}
+        </Box>
+      )
+    }
+    const colWidth = Math.max(8, isAvatar ? inner - AVATAR_COLUMNS - 1 : inner)
+    const rule = (
+      <Text color={tone.frame} dimColor={tone.frame === undefined} backgroundColor={tone.card} wrap="truncate-end">
+        {'─'.repeat(Math.max(1, inner))}
+      </Text>
+    )
+    const iconOf = (row: AgentRow) =>
+      row.status === 'running'
+        ? { mark: '●', color: tone.bad }
+        : row.status === 'completed'
+          ? { mark: '✓', color: tone.ok }
+          : { mark: '✗', color: tone.bad }
+    const waitsOn = (todo: Todo) => {
+      const open = (todo.blockedBy ?? []).filter(id => plan.find(one => one.id === id)?.status !== 'completed')
+
+      return open.length > 0 ? `après ${open.join(', ')}` : 'prête'
+    }
+
+    const agentLine = (row: AgentRow) => {
+      const tier = tierOf(row.effort)
+      const room = windowOf(row.model ?? '')
+      const used = Math.min(1, row.context / room)
+      const pct = Math.round((row.context / room) * 100)
+      const ms = (row.endedAt ?? now) - row.startedAt
+      const icon = iconOf(row)
+      const name = row.model === null ? row.type : modelName(row.model)
+
+      if (isFolded) {
+        const right = `${tier === null ? '' : ' · '}${pct}% · ${clock(ms)}`
+
+        return (
+          <Box key={`agents:row:${row.id}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
+            <Text backgroundColor={tone.card} wrap="truncate-end">
+              <Text color={icon.color} backgroundColor={tone.card}>{icon.mark}</Text>
+              <Text bold color={tone.text} backgroundColor={tone.card}>
+                {` ${cut(row.title, Math.max(8, inner - right.length - (tier?.length ?? 0) - 4))}`}
+              </Text>
+            </Text>
+            <Text backgroundColor={tone.card} wrap="truncate-end">
+              {tier !== null && <Text bold color={tone.tiers[tier]} backgroundColor={tone.card}>{tier}</Text>}
+              <Text {...quiet(tone, tone.card)}>{right}</Text>
+            </Text>
+          </Box>
+        )
+      }
+
+      return (
+        <Box key={`agents:row:${row.id}`} flexDirection="row" width="100%" columnGap={1}>
+          {isAvatar && avatar(`agent:ava:${row.id}`, tier, false)}
+          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box flexDirection="row" width="100%" justifyContent="space-between">
+              <Text bold color={tone.text} backgroundColor={tone.card} wrap="truncate-end">
+                {cut(row.title, colWidth - 2)}
+              </Text>
+              <Text color={icon.color} backgroundColor={tone.card}>{icon.mark}</Text>
+            </Box>
+            <Text backgroundColor={tone.card} wrap="truncate-end">
+              {tier !== null && <Text bold color={tone.tiers[tier]} backgroundColor={tone.card}>{tier}</Text>}
+              <Text color={tone.text} backgroundColor={tone.card}>
+                {`${tier === null ? '' : ' '}${name}${row.effort === null ? '' : ` · ${row.effort}`}`}
+              </Text>
+            </Text>
+            <Text {...quiet(tone, tone.card)} wrap="truncate-end">
+              {`ctx ${pct}% · ${compact(row.context)} ${dollars(row.usd)} ${clock(ms)}`}
+            </Text>
+            {meter(parts, tone, used, colWidth, tier === null ? tone.mark : tone.tiers[tier])}
+          </Box>
+        </Box>
+      )
+    }
+
+    const plannedLine = (todo: Todo, rank: string) => {
+      const waits = waitsOn(todo)
+
+      if (isFolded) {
+        return (
+          <Box key={`agents:todo:${rank}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
+            <Text {...quiet(tone, tone.card)} wrap="truncate-end">
+              {`◷ ${cut(`${rank}. ${todo.content}`, Math.max(8, inner - waits.length - 4))}`}
+            </Text>
+            <Text {...quiet(tone, tone.card)}>{waits}</Text>
+          </Box>
+        )
+      }
+
+      return (
+        <Box key={`agents:todo:${rank}`} flexDirection="row" width="100%" columnGap={1}>
+          {isAvatar && avatar(`agent:ava:todo-${rank}`, null, true)}
+          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box flexDirection="row" width="100%" justifyContent="space-between">
+              <Text bold color={tone.text} backgroundColor={tone.card} wrap="truncate-end">
+                {cut(`${rank}. ${todo.content}`, colWidth - 2)}
+              </Text>
+              <Text {...quiet(tone, tone.card)}>◷</Text>
+            </Box>
+            <Text {...quiet(tone, tone.card)} wrap="truncate-end">
+              {waits}
+            </Text>
+          </Box>
+        </Box>
+      )
+    }
+
+    // Group titles go in front of their group's lines; the finished one is always a button.
+    const groupTitle = (label: string) => <Text {...quiet(tone, tone.card)}>{label}</Text>
+    const shownRunning = shown.filter(one => one.kind === 'agent' && one.row.status === 'running')
+    const shownDone = shown.filter(one => one.kind === 'agent' && one.row.status !== 'running')
+    const shownPlanned = shown.filter(one => one.kind === 'todo')
+    // A line, and the rule under it unless it is the last one shown.
+    const lineNodes = (group: Line[], from: number) =>
+      group.flatMap((one, at) => [
+        one.kind === 'agent' ? agentLine(one.row) : plannedLine(one.todo, one.rank),
+        ...(!isFolded && from + at < shown.length - 1 ? [rule] : []),
+      ])
+    const doneTitle = doneL.length > 0 && (
+      <Box flexDirection="row" width="100%">
+        <Button
+          key="agents:done"
+          plain
+          hotkey="t"
+          label={`${view.isDoneHidden ? '▸' : '▾'} Terminés · ${doneL.length}`}
+          dimColor
+          onPress={() => undefined}
+        />
+      </Box>
+    )
+
+    const inHand = plan.find(one => one.status === 'in_progress')
+    const sum = (pick: (one: AgentRow) => number) => crew.reduce((total, one) => total + pick(one), 0)
+    const isAllOver = crew.every(one => one.endedAt !== null)
+    const wall =
+      crew.length === 0
+        ? 0
+        : (isAllOver ? Math.max(...crew.map(one => one.endedAt ?? 0)) : now) - Math.min(...crew.map(one => one.startedAt))
+    const agentCard = (key: string, label: string, value: string) => (
+      <Box
+        key={key}
+        flexDirection="column"
+        width={isCells ? Math.floor((inner - 2) / 3) : '32%'}
+        flexGrow={isCells ? 0 : 1}
+        flexShrink={isCells ? 0 : 1}
+        borderStyle="round"
+        borderColor={tone.frame}
+        backgroundColor={tone.card}
+        paddingX={1}
+      >
+        <Text {...quiet(tone, tone.card)}>{label}</Text>
+        <Text bold color={tone.text} backgroundColor={tone.card} wrap="truncate-end">
+          {value}
+        </Text>
+      </Box>
+    )
+    const agentsBlock = (
+      <Box
+        key="agents"
+        flexDirection="column"
+        width="100%"
+        flexGrow={1}
+        borderStyle="round"
+        borderColor={tone.frame}
+        backgroundColor={tone.card}
+        paddingX={1}
+      >
+        <Box flexDirection="row" width="100%" justifyContent="space-between">
+          <Text backgroundColor={tone.card} wrap="truncate-end">
+            <Text {...quiet(tone, tone.card)}>AGENTS ›</Text>
+            {inHand !== undefined && (
+              <Text bold color={tone.text} backgroundColor={tone.card}>
+                {` ${cut(inHand.content, Math.max(8, inner - 20))}`}
+              </Text>
+            )}
+          </Text>
+          {!isEmpty && (
+            <Button
+              key="agents:fold"
+              plain
+              hotkey="r"
+              label={view.isFolded ? 'déplier' : 'replier'}
+              dimColor
+              onPress={() => undefined}
+            />
+          )}
+        </Box>
+        {hasCards && (
+          <Box flexDirection="row" width="100%" columnGap={1}>
+            {agentCard('agents:cost', 'COÛT', dollars(sum(one => one.usd)))}
+            {agentCard('agents:tokens', 'TOKENS', compact(sum(one => one.tokens)))}
+            {agentCard('agents:time', 'DURÉE', clock(wall))}
+          </Box>
+        )}
+        {isEmpty && <Text {...quiet(tone, tone.card)}>aucun agent lancé</Text>}
+        {shownRunning.length > 0 && groupTitle(`En cours · ${runningL.length}`)}
+        {lineNodes(shownRunning, 0)}
+        {doneTitle}
+        {lineNodes(shownDone, shownRunning.length)}
+        {shownPlanned.length > 0 && groupTitle(`Planifiés · ${plannedL.length}`)}
+        {lineNodes(shownPlanned, shownRunning.length + shownDone.length)}
+        {kept < lines.length && <Text {...quiet(tone, tone.card)}>{`+ ${lines.length - kept} autres`}</Text>}
       </Box>
     )
 
@@ -4321,6 +4966,8 @@ export const register: Register = on => {
       ...(e.props.placement === 'inline' && e.surface === 'terminal' ? ([['/tui fullscreen', 'Pane à droite']] as const) : []),
       ...(design ? ([['m', 'Miniatures'], ['o', 'Maquette']] as const) : []),
       ...(isBao ? ([['b', 'Bambou']] as const) : []),
+      ...(isEmpty ? [] : ([['r', 'Replier']] as const)),
+      ...(doneL.length > 0 ? ([['t', 'Terminés']] as const) : []),
       ['ctrl+x tab', 'Clavier'],
       ['esc', 'Rendre la main'],
       ...(mine === null ? [] : ([[`/${mine}`, 'Rouvrir']] as const)),
@@ -4339,7 +4986,7 @@ export const register: Register = on => {
         {cards}
         {book}
         {todoList}
-        <Box flexGrow={1} />
+        {agentsBlock}
         {style === 'pixel' && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
           <Raster
             key="pet"

@@ -23,6 +23,39 @@ export type Todo = {
   content: string
   status: 'pending' | 'in_progress' | 'completed'
   activeForm: string
+  /** Ids of the tasks that must finish first, as the task tools reported them. */
+  blockedBy?: string[]
+}
+
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number
+
+/** One subagent of the session, as its spawn and its steps reported it. */
+export type AgentRow = {
+  /** The agentId its loop's events carry. */
+  id: string
+  /** The spawn's description, or the listed agent's. */
+  title: string
+  /** The subagent type it runs as. */
+  type: string
+  /** The resolved model id: the spawn's, then each step's. */
+  model: string | null
+  /** The `effort` of its last step. */
+  effort: Effort | null
+  status: 'running' | 'completed' | 'failed'
+  startedAt: number
+  endedAt: number | null
+  /** The size of its last step: input, cache read, cache write and output. */
+  context: number
+  /** The four counters, summed over every step. */
+  tokens: number
+  /** What those steps cost, estimated from the price table. */
+  usd: number
+}
+
+/** How the AGENTS section is shown: rows folded to a line, the finished hidden. */
+export type AgentsView = {
+  isFolded: boolean
+  isDoneHidden: boolean
 }
 
 /** One tool call of the live feed, newest first; `ms` stays null while it runs. */
@@ -101,6 +134,8 @@ declare module 'claude-code' {
       focus: Focus
       todos: Todo[]
       feed: FeedRow[]
+      agents: AgentRow[]
+      agentsView: AgentsView
       usage: Usage
       feature: Feature | null
       gallery: Gallery
