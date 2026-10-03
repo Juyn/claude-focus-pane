@@ -717,6 +717,9 @@ const tallPane = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', bodyR
 
 const OPUS = 'claude-opus-5-5'
 
+/** A docked height where the agents unfold but the planned tasks fold: settled by the probe of the fit. */
+const VARIANT_B_ROWS = 90
+
 /** A subagent spawned by the model, then one model request of its loop. */
 const launch = async ($: Engine, description: string) => {
   const started = await $.agent.spawn({
@@ -733,7 +736,7 @@ const launch = async ($: Engine, description: string) => {
   return started.deny === undefined ? (started.agentId ?? '') : ''
 }
 
-const step = async ($: Engine, agentId: string, usage: TurnUsage, effort: 'xhigh' | 'high' = 'xhigh') => {
+const step = async ($: Engine, agentId: string, usage: TurnUsage, effort: 'xhigh' | 'high' | 'low' = 'xhigh') => {
   stepped.set(agentId, usage)
   const stream = $.turn.step({ turnId: `t-${agentId}`, index: 0, model: usage.model, effort, messageCount: 3, agentId })
   for await (const _chunk of stream) {
@@ -777,6 +780,37 @@ const rasterKeys = (tree: unknown) => {
   return keys
 }
 
+const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+/** A Raster's cells decoded: the u32 words, three to a cell. */
+const cellWords = (cells: unknown) => {
+  const bytes: number[] = []
+  let bits = 0
+  let held = 0
+  for (const ch of String(cells).replace(/=+$/, '')) {
+    held = (held << 6) | BASE64.indexOf(ch)
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      bytes.push((held >> bits) & 255)
+    }
+  }
+  const words: number[] = []
+  for (let at = 0; at + 3 < bytes.length; at += 4) {
+    words.push((bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8) | ((bytes[at + 2] ?? 0) << 16) | ((bytes[at + 3] ?? 0) << 24))
+  }
+
+  return words
+}
+
+/** The colors a Raster paints, as #rrggbb, the terminal default left out. */
+const paintOf = (cells: unknown) =>
+  new Set(
+    cellWords(cells)
+      .filter((word, at) => at % 3 !== 0 && word !== 0x01000000)
+      .map(word => `#${(word & 0xffffff).toString(16).padStart(6, '0')}`),
+  )
+
 test('a spawned subagent and its steps draw a running row: tier, model, context, cost, avatar', async ($, on) => {
   engine(on)
   const id = await launch($, 'Cache clock handover')
@@ -791,8 +825,8 @@ test('a spawned subagent and its steps draw a running row: tier, model, context,
   expect(await pane.find({ text: '●' })).toBeDefined()
   const avatar = await pane.find({ key: 'agent:ava:a1' })
   expect(avatar?.type).toBe('Raster')
-  expect(avatar?.props.columns).toBe(10)
-  expect(avatar?.props.rows).toBe(3)
+  expect(avatar?.props.columns).toBe(11)
+  expect(avatar?.props.rows).toBe(4)
 })
 
 test('a finished subagent moves to Terminés with a check, a failed one with a cross', async ($, on) => {
@@ -968,27 +1002,12 @@ test('under an ansi theme the avatar is still drawn, on the terminal default col
   const avatar = await pane.find({ key: 'agent:ava:a1' })
 
   expect(avatar?.type).toBe('Raster')
-  expect(avatar?.props.columns).toBe(10)
-  expect(avatar?.props.rows).toBe(3)
+  expect(avatar?.props.columns).toBe(11)
+  expect(avatar?.props.rows).toBe(4)
 
   // base64 of u32 triplets: 0x01000000 little-endian is the bytes 00 00 00 01.
-  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-  const bytes: number[] = []
-  let bits = 0
-  let held = 0
-  for (const ch of String(avatar?.props.cells).replace(/=+$/, '')) {
-    held = (held << 6) | letters.indexOf(ch)
-    bits += 6
-    if (bits >= 8) {
-      bits -= 8
-      bytes.push((held >> bits) & 255)
-    }
-  }
-  const words: number[] = []
-  for (let at = 0; at + 3 < bytes.length; at += 4) {
-    words.push((bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8) | ((bytes[at + 2] ?? 0) << 16) | ((bytes[at + 3] ?? 0) << 24))
-  }
-  expect(words.length).toBe(90)
+  const words = cellWords(avatar?.props.cells)
+  expect(words.length).toBe(132)
   expect(words.filter(word => word === 0x01000000).length).toBeGreaterThan(0)
 })
 
@@ -1039,7 +1058,7 @@ test('on the desktop the avatar is a crisp Svg, and the mobile gets none', async
   }
   walk(await (await tallPane($, 'desktop')).drawn())
 
-  expect(sources.filter(one => /viewBox="0 0 10 6"/.test(one) && /crispEdges/.test(one))).toHaveLength(1)
+  expect(sources.filter(one => /viewBox="0 0 11 8"/.test(one) && /crispEdges/.test(one))).toHaveLength(1)
 })
 
 test('the demo fills the agents: one running, two finished, planned tasks that wait on others', async ($, on) => {
@@ -1156,4 +1175,86 @@ test('the outlines and the todos give way so that every agent keeps a line', asy
 
   expect(keys.filter(key => key.startsWith('agents:row:'))).toHaveLength(3)
   expect(await pane.find({ key: 'agents:totals' })).toBeDefined()
+})
+
+/** The first node of a drawing that answers. */
+const seek = (tree: unknown, wanted: (node: NonNullable<Drawn>) => boolean): NonNullable<Drawn> | undefined => {
+  const one = tree as Drawn
+  if (!one || typeof one !== 'object') return undefined
+  if (wanted(one)) return one
+  for (const child of one.children ?? []) {
+    const hit = seek(child, wanted)
+    if (hit !== undefined) return hit
+  }
+
+  return undefined
+}
+
+test('each tier dresses the crab in its own hat', async ($, on) => {
+  engine(on)
+  for (const [title, effort] of [['Lourd', 'xhigh'], ['Soigné', 'high'], ['Léger', 'low']] as const) {
+    await step($, await launch($, title), SMALL, effort)
+  }
+  const pane = await tallPane($)
+  const paint = async (id: string) => paintOf((await pane.find({ key: `agent:ava:${id}` }))?.props.cells)
+  const heavy = await paint('a1')
+  const careful = await paint('a2')
+  const light = await paint('a3')
+
+  expect(heavy).toContain('#8a4a1e')
+  expect(heavy).toContain('#9ccfff')
+  expect(heavy).toContain('#e5775a')
+  expect(careful).toContain('#f2c230')
+  expect(careful).not.toContain('#8a4a1e')
+  expect(light).toContain('#1f8f62')
+  expect(light).not.toContain('#f2c230')
+})
+
+test('a planned task wears the bare crab, faded, and its two lines are centered', async ($, on) => {
+  await start($, on)
+  await $.command.run({ command: 'mission', args: 'demo', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  const demo = await tallPane($)
+  const planned = rasterKeys(await demo.drawn()).filter(key => key.startsWith('agent:ava:todo-'))
+  expect(planned.length).toBeGreaterThan(0)
+  const hats = ['#8a4a1e', '#9ccfff', '#f2c230', '#1f8f62', '#b4441c', '#d99a10', '#2f62b8']
+  const row = seek(await demo.drawn(), node => String(node.props?.key).startsWith('agents:todo:'))
+  expect(row?.children?.some(child => (child as Drawn)?.props?.justifyContent === 'center')).toBe(true)
+  for (const key of planned) {
+    const colors = paintOf((await demo.find({ key }))?.props.cells)
+    expect(colors.size).toBeGreaterThan(0)
+    for (const hat of hats) expect(colors).not.toContain(hat)
+    expect(colors).not.toContain('#e5775a')
+  }
+})
+
+test('an unfolded agent, its meta and stats in the chip grey, its bar full', async ($, on) => {
+  engine(on)
+  await step($, await launch($, 'Centré'), BIG)
+  const pane = await tallPane($)
+
+  const line = seek(await pane.drawn(), node => node.props?.key === 'agents:row:a1')
+  expect((await pane.find({ text: /^ Opus 5\.5 · xhigh$/ }))?.props.color).toBe('#aab6dd')
+  expect((await pane.find({ text: /^ctx 18% · 177k/ }))?.props.color).toBe('#aab6dd')
+  const bar = await pane.find({ text: /^━+$/ })
+  expect(bar).toBeDefined()
+  expect(bar?.text.length).toBeGreaterThan(8)
+  expect(seek(line, node => node.type === 'Text' && node.props?.color === '#2a3350' && /^━+$/.test(String((node.children ?? []).join('')))))
+    .toBeDefined()
+})
+
+test('the shared meter keeps its thin track on the cards above', async ($, on) => {
+  engine(on)
+  const pane = await tallPane($)
+
+  expect(await pane.find({ text: /^━*─+$/ })).toBeDefined()
+})
+
+test('where the three-line cards and the unfolded planned rows do not fit, the agents keep their avatars and the planned fold', async ($, on) => {
+  const pane = await demoDock($, on, 100, VARIANT_B_ROWS)
+  const keys = rasterKeys(await pane.drawn())
+
+  expect(keys).toContain('agent:ava:demo-1')
+  expect(keys.filter(key => key.startsWith('agent:ava:todo-'))).toEqual([])
+  expect(await pane.find({ text: /^◷ / })).toBeDefined()
+  expect(await pane.find({ key: 'agents:cost' })).toBeDefined()
 })

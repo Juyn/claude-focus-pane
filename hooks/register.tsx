@@ -3314,19 +3314,78 @@ const asIds = (value: unknown): string[] =>
 const joined = (was: string[] | undefined, more: string[]) => [...new Set([...(was ?? []), ...more])]
 
 /**
- * The crab, 10 by 6 pixels, two a terminal row. `H` hat, `B` brim, `A` and `S` a
- * trinket and its stem, `O` body, `K` eyes, `.` nothing.
+ * Clawd, 11 by 8 pixels, two a terminal row, a hat for each tier. Letters name a color of
+ * the grid's own palette; `.` is nothing.
  */
-const AVATAR = ['..HHHHHH.A', '.BBBBBBBBS', '.OOOOOOOO.', 'OOKOOOOKOO', '.OOOOOOOO.', '.O.O..O.O.'] as const
-const AVATAR_COLUMNS = 10
-const AVATAR_ROWS = 3
-const CRAB: Record<string, string> = { O: '#d97757', K: '#1f1a17' }
-const HATS: Record<Tier | 'none', Record<string, string>> = {
-  heavy: { H: '#7a4a2a', B: '#5c3720', A: '#5aa9ff', S: '#9aa0a6' },
-  careful: { H: '#f2c230', B: '#d99a00' },
-  medium: { H: '#c8ccd4', B: '#3f6fd8' },
-  light: { H: '#2fa66a', B: '#1f7a4c', A: '#f2efe8', S: '#9aa0a6' },
-  none: { H: '#8a7f6a', B: '#6e6553' },
+const AVATAR_COLUMNS = 11
+const AVATAR_ROWS = 4
+const BODY = { O: '#e5775a', K: '#1a1512' }
+const SPRITES: Record<Tier | 'none', { grid: readonly string[]; palette: Record<string, string> }> = {
+  heavy: {
+    grid: [
+      '.....HH...Q',
+      '...HHlHH..S',
+      '..BBBBBBB.S',
+      '..OOOOOOOOS',
+      '..OKOOOKOO.',
+      '.OOOOOOOO..',
+      '..OOOOOOO..',
+      '..O.O.O.O..',
+    ],
+    palette: { ...BODY, H: '#8a4a1e', l: '#c98a55', B: '#b4441c', S: '#8f8f8f', Q: '#9ccfff' },
+  },
+  careful: {
+    grid: [
+      '.....YY....',
+      '....YccY...',
+      's..BBBBBB..',
+      '..OOOOOOO..',
+      '..OKOOOKO..',
+      '.OOOOOOOOO.',
+      '..OOOOOOO..',
+      '..O.O.O.O..',
+    ],
+    palette: { ...BODY, Y: '#f2c230', c: '#c27800', B: '#d99a10', s: '#b8cce0' },
+  },
+  medium: {
+    grid: [
+      '.....GG....',
+      '...GGdGGG..',
+      '..bbbbbbbxt',
+      '..OOOOOOO..',
+      '..OKOOOKO..',
+      '.OOOOOOOOO.',
+      '..OOOOOOO..',
+      '..O.O.O.O..',
+    ],
+    palette: { ...BODY, G: '#b0b0b0', d: '#7c7c7c', b: '#2f62b8', x: '#3a3a3a', t: '#e0a640' },
+  },
+  light: {
+    grid: [
+      '..........F',
+      '...GGGGG..P',
+      '..GGGWGGG.P',
+      '..OOOOOOOOP',
+      '..OKOOOKOO.',
+      '.OOOOOOOO..',
+      '..OOOOOOO..',
+      '..O.O.O.O..',
+    ],
+    palette: { ...BODY, G: '#1f8f62', W: '#d8ddd6', P: '#9a9a9a', F: '#f2f2f2' },
+  },
+  none: {
+    grid: [
+      '...........',
+      '...........',
+      '...........',
+      '..OOOOOOO..',
+      '..OKOOOKO..',
+      '.OOOOOOOOO.',
+      '..OOOOOOO..',
+      '..O.O.O.O..',
+    ],
+    palette: BODY,
+  },
 }
 
 /** `hex` and `toward` blended, `share` of the way. */
@@ -3343,13 +3402,14 @@ const mixHex = (hex: string, toward: string, share: number) => {
 
 /** The crab's pixels: a color, or undefined for the ground. A planned row's fade toward it. */
 const avatarPixels = (tier: Tier | null, isPlanned: boolean, ground: string | undefined) => {
-  const palette = { ...CRAB, ...HATS[tier ?? 'none'] }
+  // A planned task has no tier yet: the bare crab.
+  const sprite = SPRITES[isPlanned ? 'none' : (tier ?? 'none')]
 
-  return AVATAR.map(row =>
+  return sprite.grid.map(row =>
     [...row].map(letter => {
-      const hex = palette[letter]
+      const hex = sprite.palette[letter]
 
-      return hex !== undefined && isPlanned && ground !== undefined ? mixHex(hex, ground, 0.5) : hex
+      return hex !== undefined && isPlanned && ground !== undefined ? mixHex(hex, ground, 0.4) : hex
     }),
   )
 }
@@ -3374,7 +3434,7 @@ const avatarCells = (pixels: (string | undefined)[][], ground: string | undefine
 
 /** The crab as a vector picture, for a surface that draws one. */
 const avatarSvg = (pixels: (string | undefined)[][]) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 6" width="40" height="24" shape-rendering="crispEdges">` +
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11 8" width="33" height="24" shape-rendering="crispEdges">` +
   pixels
     .flatMap((row, y) =>
       row.flatMap((hex, x) => (hex === undefined ? [] : [`<rect x="${x}" y="${y}" width="1" height="1" fill="${hex}"/>`])),
@@ -3474,7 +3534,14 @@ const legend = (
 )
 
 /** A thin progress line: the filled part in its color, the rest as a track. */
-const meter = ({ Text, Svg }: Elements, tone: Tone, ratio: number, width: number, color: string | undefined) => {
+const meter = (
+  { Text, Svg }: Elements,
+  tone: Tone,
+  ratio: number,
+  width: number,
+  color: string | undefined,
+  trackGlyph = '─',
+) => {
   // Off the terminal a row of characters has no known width: a drawn bar fits its card.
   if (Svg !== undefined) {
     const share = Math.max(0, Math.min(100, ratio * 100))
@@ -3499,7 +3566,7 @@ const meter = ({ Text, Svg }: Elements, tone: Tone, ratio: number, width: number
         {'━'.repeat(filled)}
       </Text>
       <Text color={tone.track} dimColor={tone.track === undefined} backgroundColor={tone.card}>
-        {'─'.repeat(width - filled)}
+        {trackGlyph.repeat(width - filled)}
       </Text>
     </Text>
   )
@@ -4569,25 +4636,30 @@ export const register: Register = on => {
     const isEmpty = crew.length === 0 && plannedL.length === 0
     const hasCards = crew.length > 0
 
-    // What the section takes in rows, for `kept` of its lines: folded or not, with the
-    // three cards (4 rows), one row of totals, or neither when no agent ran.
-    const agentsRows = (isFolded: boolean, isCards: boolean, kept: number) => {
+    const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
+    // What the section takes in rows, for `kept` of its lines: its agents and its planned
+    // tasks unfolded or not, with the three cards (4 rows), one row of totals, or neither
+    // when no agent ran. An unfolded line takes its avatar's rows and a rule under it,
+    // unless it is the last one shown.
+    type Fold = { agents: boolean; planned: boolean; cards: boolean }
+    const agentsRows = ({ agents: isAgentsFolded, planned: isPlannedFolded, cards: isCards }: Fold, kept: number) => {
       const shown = lines.slice(0, kept)
       const titles =
         (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
         (doneL.length > 0 ? 1 : 0) +
         (shown.some(one => one.kind === 'todo') ? 1 : 0)
-      const body = isFolded
-        ? shown.length
-        : shown.reduce((sum, one) => sum + (one.kind === 'agent' ? 4 : 3), 0) + Math.max(0, shown.length - 1)
+      const body = shown.reduce((sum, one, at) => {
+        if (one.kind === 'agent' ? isAgentsFolded : isPlannedFolded) return sum + 1
+
+        return sum + (one.kind === 'agent' || isAvatar ? 4 : 2) + (at < shown.length - 1 ? 1 : 0)
+      }, 0)
 
       return 3 + (hasCards ? (isCards ? 4 : 1) : 0) + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)
     }
     // What it must have before anything else gives way: every agent on one line each and the
     // totals; with no agent, the empty state or a first planned task.
     const agentsNeed = agentsRows(
-      true,
-      false,
+      { agents: true, planned: true, cards: false },
       hasCards ? runningL.length + (view.isDoneHidden ? 0 : doneL.length) : Math.min(1, lines.length),
     )
 
@@ -4650,22 +4722,30 @@ export const register: Register = on => {
 
 
     // ------------------------------------------------------------- the agents
-    // With the rows left, the richest that fits: unfolded or folded, three cards or one totals
-    // row; else folded with totals and the first lines only, the running ones kept longest.
-    // The person's fold takes the folded ones alone.
+    // With the rows left, the richest that fits: (a) all unfolded with the cards, (b) the agents
+    // unfolded and the planned folded with the cards, (c) the same with a totals row, (d) all
+    // folded with the cards, (e) all folded with the totals, (f) e cut to its first lines,
+    // the running ones kept longest. The person's fold takes d, e and f alone.
     const budget = tall - rowsOf(outlines, todosKept)
-    const variants: (readonly [boolean, boolean])[] = view.isFolded
-      ? [[true, true], [true, false]]
-      : [[false, true], [false, false], [true, true], [true, false]]
-    const picked = variants.find(([folded, cards]) => agentsRows(folded, cards, lines.length) <= budget)
-    const isFolded = picked === undefined ? true : picked[0]
-    const isCards = picked === undefined ? false : picked[1]
+    const variants: Fold[] = [
+      { agents: false, planned: false, cards: true },
+      { agents: false, planned: true, cards: true },
+      { agents: false, planned: true, cards: false },
+      { agents: true, planned: true, cards: true },
+      { agents: true, planned: true, cards: false },
+    ].slice(view.isFolded ? 3 : 0)
+    const picked = variants.find(fold => agentsRows(fold, lines.length) <= budget)
+    const isAgentsFolded = picked === undefined ? true : picked.agents
+    const isPlannedFolded = picked === undefined ? true : picked.planned
+    const isCards = picked === undefined ? false : picked.cards
     let kept = lines.length
     // Past the floors the pane overflows and scrolls: a running agent is never cut for room.
-    if (picked === undefined) while (kept > runningL.length && agentsRows(true, false, kept) > budget) kept -= 1
+    if (picked === undefined) {
+      const floor: Fold = { agents: true, planned: true, cards: false }
+      while (kept > runningL.length && agentsRows(floor, kept) > budget) kept -= 1
+    }
     const shown = lines.slice(0, kept)
 
-    const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
     const avatar = (key: string, tier: Tier | null, isPlanned: boolean) => {
       const pixels = avatarPixels(tier, isPlanned, tone.card)
 
@@ -4674,7 +4754,7 @@ export const register: Register = on => {
           {Raster !== undefined ? (
             <Raster key={key} columns={AVATAR_COLUMNS} rows={AVATAR_ROWS} cells={avatarCells(pixels, tone.card)} />
           ) : (
-            Svg !== undefined && <Svg source={avatarSvg(pixels)} alt="agent" width={40} height={24} />
+            Svg !== undefined && <Svg source={avatarSvg(pixels)} alt="agent" width={33} height={24} />
           )}
         </Box>
       )
@@ -4706,7 +4786,7 @@ export const register: Register = on => {
       const icon = iconOf(row)
       const name = row.model === null ? row.type : modelName(row.model)
 
-      if (isFolded) {
+      if (isAgentsFolded) {
         const right = `${tier === null ? '' : ' · '}${pct}% · ${clock(ms)}`
 
         return (
@@ -4737,14 +4817,14 @@ export const register: Register = on => {
             </Box>
             <Text backgroundColor={tone.card} wrap="truncate-end">
               {tier !== null && <Text bold color={tone.tiers[tier]} backgroundColor={tone.card}>{tier}</Text>}
-              <Text color={tone.text} backgroundColor={tone.card}>
+              <Text color={tone.chipText} backgroundColor={tone.card}>
                 {`${tier === null ? '' : ' '}${name}${row.effort === null ? '' : ` · ${row.effort}`}`}
               </Text>
             </Text>
-            <Text {...quiet(tone, tone.card)} wrap="truncate-end">
+            <Text color={tone.chipText} backgroundColor={tone.card} wrap="truncate-end">
               {`ctx ${pct}% · ${compact(row.context)} ${dollars(row.usd)} ${clock(ms)}`}
             </Text>
-            {meter(parts, tone, used, colWidth, tier === null ? tone.mark : tone.tiers[tier])}
+            {meter(parts, tone, used, colWidth, tier === null ? tone.mark : tone.tiers[tier], '━')}
           </Box>
         </Box>
       )
@@ -4753,7 +4833,7 @@ export const register: Register = on => {
     const plannedLine = (todo: Todo, rank: string) => {
       const waits = waitsOn(todo)
 
-      if (isFolded) {
+      if (isPlannedFolded) {
         return (
           <Box key={`agents:todo:${rank}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
             <Text {...quiet(tone, tone.card)} wrap="truncate-end">
@@ -4767,7 +4847,7 @@ export const register: Register = on => {
       return (
         <Box key={`agents:todo:${rank}`} flexDirection="row" width="100%" columnGap={1}>
           {isAvatar && avatar(`agent:ava:todo-${rank}`, null, true)}
-          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="center">
             <Box flexDirection="row" width="100%" justifyContent="space-between">
               <Text bold color={tone.text} backgroundColor={tone.card} wrap="truncate-end">
                 {cut(`${rank}. ${todo.content}`, colWidth - 2)}
@@ -4791,7 +4871,7 @@ export const register: Register = on => {
     const lineNodes = (group: Line[], from: number) =>
       group.flatMap((one, at) => [
         one.kind === 'agent' ? agentLine(one.row) : plannedLine(one.todo, one.rank),
-        ...(!isFolded && from + at < shown.length - 1 ? [rule] : []),
+        ...((one.kind === 'agent' ? !isAgentsFolded : !isPlannedFolded) && from + at < shown.length - 1 ? [rule] : []),
       ])
     const doneTitle = doneL.length > 0 && (
       <Box flexDirection="row" width="100%">
