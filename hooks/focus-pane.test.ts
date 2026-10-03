@@ -1064,3 +1064,19 @@ test('the legend names r, and t when there are finished agents', async ($, on) =
 
   expect((await after.find({ key: 'legend' }))?.text).toMatch(/r Replier  t Terminés/)
 })
+
+test('the pane redraws each second while an agent runs, and stops once none does', async ($, on) => {
+  const clock = engine(on)
+  let redraws = 0
+  on('ui.invalidate', () => {
+    redraws += 1
+  })
+  const id = await launch($, 'Qui tourne')
+  await clock.advance(3000)
+  expect(redraws).toBeGreaterThanOrEqual(3)
+
+  await finish($, id, 'answer')
+  const settled = redraws
+  await clock.advance(3000)
+  expect(redraws).toBe(settled)
+})
