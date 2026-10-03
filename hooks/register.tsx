@@ -3314,75 +3314,86 @@ const asIds = (value: unknown): string[] =>
 const joined = (was: string[] | undefined, more: string[]) => [...new Set([...(was ?? []), ...more])]
 
 /**
- * Clawd, 11 by 8 pixels, two a terminal row, a hat for each tier. Letters name a color of
- * the grid's own palette; `.` is nothing.
+ * Clawd as the mock-up draws him, in a box of 9 cells by 3: each cell split in two columns
+ * and two rows of quarter cells (the quadrant blocks), a grid of 18 by 6. One quarter cell
+ * across is one pixel of the mock-up, one down is two: the body 8 wide, the arms 2, the legs
+ * `L.L..L.L`. Letters name a color of the sprite's palette, `.` is the ground; a cell holds
+ * two colors at most, foreground and background, and the grids keep to it.
+ *
+ * A few cells (`fine`, keyed `row,column` in cells) take a finer glyph than a quadrant: ▃, a
+ * lower three eighths, for a thin brim or band under a crown; the careful spark's `+`; the
+ * bonnet's speck `·`. Their colors are a letter for the foreground and one for the
+ * background, the ground when absent.
  */
-const AVATAR_COLUMNS = 11
-const AVATAR_ROWS = 4
-const BODY = { O: '#e5775a', K: '#1a1512' }
-const SPRITES: Record<Tier | 'none', { grid: readonly string[]; palette: Record<string, string> }> = {
+const AVATAR_COLUMNS = 9
+const AVATAR_ROWS = 3
+const BODY = { O: '#ec7a58', K: '#1a1512' }
+type Sprite = {
+  grid: readonly string[]
+  palette: Record<string, string>
+  fine?: Record<string, readonly [glyph: string, fore: string, back?: string]>
+}
+const SPRITES: Record<Tier | 'none', Sprite> = {
+  // A speckled brown bonnet on a red-brown brim; the right arm up, holding the antenna's light.
   heavy: {
     grid: [
-      '.....HH...Q',
-      '...HHlHH..S',
-      '..BBBBBBB.S',
-      '..OOOOOOOOS',
-      '..OKOOOKOO.',
-      '.OOOOOOOO..',
-      '..OOOOOOO..',
-      '..O.O.O.O..',
+      '.....HHHH...QQQ...',
+      '..BBHHHHHHBB.Q....',
+      '...OKOOOOKOOOO....',
+      '.OOOOOOOOOO.......',
+      '...OOOOOOOO.......',
+      '...O.O..O.O.......',
     ],
-    palette: { ...BODY, H: '#8a4a1e', l: '#c98a55', B: '#b4441c', S: '#8f8f8f', Q: '#9ccfff' },
+    palette: { ...BODY, H: '#8a4a1e', l: '#c98a55', B: '#b4441c', Q: '#9ccfff' },
+    fine: { '0,1': ['▃', 'B'], '0,3': ['·', 'l', 'H'], '0,5': ['▃', 'B'] },
   },
+  // A yellow hard hat, its orange badge and darker brim; a pale spark by its side.
   careful: {
     grid: [
-      '.....YY....',
-      '....YccY...',
-      's..BBBBBB..',
-      '..OOOOOOO..',
-      '..OKOOOKO..',
-      '.OOOOOOOOO.',
-      '..OOOOOOO..',
-      '..O.O.O.O..',
+      '.....YccY.........',
+      '..BBYYYYYYBB......',
+      '...OKOOOOKO.......',
+      '.OOOOOOOOOOOO.....',
+      '...OOOOOOOO.......',
+      '...O.O..O.O.......',
     ],
     palette: { ...BODY, Y: '#f2c230', c: '#c27800', B: '#d99a10', s: '#b8cce0' },
+    fine: { '0,0': ['+', 's'], '0,1': ['▃', 'B'], '0,5': ['▃', 'B'] },
   },
+  // A grey hat with a blue band; the right arm up, under the cigar and its ember.
   medium: {
     grid: [
-      '.....GG....',
-      '...GGdGGG..',
-      '..bbbbbbbxt',
-      '..OOOOOOO..',
-      '..OKOOOKO..',
-      '.OOOOOOOOO.',
-      '..OOOOOOO..',
-      '..O.O.O.O..',
+      '....GGGGGG........',
+      '..GGbbbbbbxxt.....',
+      '...OKOOOOKOOO.....',
+      '.OOOOOOOOOO.......',
+      '...OOOOOOOO.......',
+      '...O.O..O.O.......',
     ],
-    palette: { ...BODY, G: '#b0b0b0', d: '#7c7c7c', b: '#2f62b8', x: '#3a3a3a', t: '#e0a640' },
+    palette: { ...BODY, G: '#b0b0b0', b: '#2f62b8', x: '#3a3a3a', t: '#e0a640' },
+    fine: { '0,1': ['▃', 'G'], '0,2': ['▃', 'b', 'G'], '0,3': ['▃', 'b', 'G'], '0,4': ['▃', 'b', 'G'], '0,5': ['▃', 'x'] },
   },
+  // A green cap with its white stripe; the right arm up, holding a mast and a checkered flag.
   light: {
     grid: [
-      '..........F',
-      '...GGGGG..P',
-      '..GGGWGGG.P',
-      '..OOOOOOOOP',
-      '..OKOOOKOO.',
-      '.OOOOOOOO..',
-      '..OOOOOOO..',
-      '..O.O.O.O..',
+      '....GGGGGG...PWk..',
+      '...GGGGWGGG..PkW..',
+      '...OKOOOOKOOOO....',
+      '.OOOOOOOOOO.......',
+      '...OOOOOOOO.......',
+      '...O.O..O.O.......',
     ],
-    palette: { ...BODY, G: '#1f8f62', W: '#d8ddd6', P: '#9a9a9a', F: '#f2f2f2' },
+    palette: { ...BODY, G: '#1f8f62', W: '#e8ece6', P: '#9a9a9a', k: '#202020' },
   },
+  // Bare: a head where the hat would be.
   none: {
     grid: [
-      '...........',
-      '...........',
-      '...........',
-      '..OOOOOOO..',
-      '..OKOOOKO..',
-      '.OOOOOOOOO.',
-      '..OOOOOOO..',
-      '..O.O.O.O..',
+      '..................',
+      '...OOOOOOOO.......',
+      '...OKOOOOKO.......',
+      '.OOOOOOOOOOOO.....',
+      '...OOOOOOOO.......',
+      '...O.O..O.O.......',
     ],
     palette: BODY,
   },
@@ -3400,47 +3411,114 @@ const mixHex = (hex: string, toward: string, share: number) => {
   return `#${mixed.map(channel => channel.toString(16).padStart(2, '0')).join('')}`
 }
 
-/** The crab's pixels: a color, or undefined for the ground. A planned row's fade toward it. */
-const avatarPixels = (tier: Tier | null, isPlanned: boolean, ground: string | undefined) => {
-  // A planned task has no tier yet: the bare crab.
-  const sprite = SPRITES[isPlanned ? 'none' : (tier ?? 'none')]
+/** One cell of the crab: its glyph and two colors, undefined for the ground. */
+type AvatarCell = { glyph: number; fore: string | undefined; back: string | undefined }
 
-  return sprite.grid.map(row =>
-    [...row].map(letter => {
-      const hex = sprite.palette[letter]
-
-      return hex !== undefined && isPlanned && ground !== undefined ? mixHex(hex, ground, 0.4) : hex
-    }),
-  )
+/** The quadrant block for the quarter cells in the foreground: upper left, upper right, lower left, lower right. */
+const QUADRANTS: Record<string, number> = {
+  '0000': 0x20,
+  '1000': 0x2598,
+  '0100': 0x259d,
+  '0010': 0x2596,
+  '0001': 0x2597,
+  '1100': 0x2580,
+  '0011': 0x2584,
+  '1010': 0x258c,
+  '0101': 0x2590,
+  '1001': 0x259a,
+  '0110': 0x259e,
+  '1110': 0x259b,
+  '1101': 0x259c,
+  '1011': 0x2599,
+  '0111': 0x259f,
+  '1111': 0x2588,
 }
 
-/** The crab as Raster cells: half blocks, the lower pixel the foreground. */
-const avatarCells = (pixels: (string | undefined)[][], ground: string | undefined) => {
-  const base = ground === undefined ? 0x01000000 : rgb(ground)
-  const words = new Uint32Array(AVATAR_COLUMNS * AVATAR_ROWS * 3)
-  for (let row = 0; row < AVATAR_ROWS; row += 1) {
-    for (let x = 0; x < AVATAR_COLUMNS; x += 1) {
-      const cell = (row * AVATAR_COLUMNS + x) * 3
-      const top = pixels[row * 2]?.[x]
-      const bottom = pixels[row * 2 + 1]?.[x]
-      words[cell] = LOWER_HALF
-      words[cell + 1] = bottom === undefined ? base : rgb(bottom)
-      words[cell + 2] = top === undefined ? base : rgb(top)
-    }
+/**
+ * The crab's cells, row-major. A planned task has no tier yet: the bare crab, faded toward
+ * the ground (not under an ansi theme, whose ground is the terminal's own).
+ */
+const avatarGlyphs = (tier: Tier | null, isPlanned: boolean, ground: string | undefined): AvatarCell[] => {
+  const sprite = SPRITES[isPlanned ? 'none' : (tier ?? 'none')]
+  const paint = (letter: string | undefined) => {
+    const hex = letter === undefined ? undefined : sprite.palette[letter]
+
+    return hex !== undefined && isPlanned && ground !== undefined ? mixHex(hex, ground, 0.4) : hex
   }
+
+  return Array.from({ length: AVATAR_ROWS * AVATAR_COLUMNS }, (_, at): AvatarCell => {
+    const row = Math.floor(at / AVATAR_COLUMNS)
+    const column = at % AVATAR_COLUMNS
+    const fine = sprite.fine?.[`${row},${column}`]
+    if (fine !== undefined) return { glyph: fine[0].codePointAt(0) ?? 0x20, fore: paint(fine[1]), back: paint(fine[2]) }
+
+    const quarters = [0, 1].flatMap(down => [0, 1].map(across => paint(sprite.grid[row * 2 + down]?.[column * 2 + across])))
+    const [upLeft, upRight, downLeft, downRight] = quarters
+    const colors = [...new Set(quarters)]
+    if (colors.length === 1) return { glyph: 0x20, fore: upLeft, back: upLeft }
+
+    // The background takes the top when it is one color: the half or quarter blocks then stand
+    // on the cell's lower edge (no ▀, which xterm.js draws a pixel short of the top).
+    const back = upLeft === upRight ? upLeft : colors.includes(undefined) ? undefined : downLeft === downRight ? downLeft : upLeft
+    const fore = colors.find(one => one !== back)
+
+    return { glyph: QUADRANTS[quarters.map(one => (one === back ? '0' : '1')).join('')] ?? 0x20, fore, back }
+  })
+}
+
+/** The crab as Raster cells. */
+const avatarCells = (cells: AvatarCell[], ground: string | undefined) => {
+  const base = ground === undefined ? 0x01000000 : rgb(ground)
+  const words = new Uint32Array(cells.length * 3)
+  cells.forEach((one, at) => {
+    words[at * 3] = one.glyph
+    words[at * 3 + 1] = one.fore === undefined ? base : rgb(one.fore)
+    words[at * 3 + 2] = one.back === undefined ? base : rgb(one.back)
+  })
 
   return toBase64(new Uint8Array(words.buffer))
 }
 
-/** The crab as a vector picture, for a surface that draws one. */
-const avatarSvg = (pixels: (string | undefined)[][]) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11 8" width="33" height="24" shape-rendering="crispEdges">` +
-  pixels
-    .flatMap((row, y) =>
-      row.flatMap((hex, x) => (hex === undefined ? [] : [`<rect x="${x}" y="${y}" width="1" height="1" fill="${hex}"/>`])),
-    )
-    .join('') +
-  '</svg>'
+/** A cell as the terminal draws it, 10 by 21; a quadrant's quarters, and what a finer glyph paints, as x, y, w, h. */
+const CELL_W = 10
+const CELL_H = 21
+const MASKS: Record<number, string> = Object.fromEntries(Object.entries(QUADRANTS).map(([mask, glyph]) => [glyph, mask]))
+const FINE_SHAPES: Record<number, readonly (readonly [number, number, number, number])[]> = {
+  0x2583: [[0, (CELL_H * 5) / 8, CELL_W, (CELL_H * 3) / 8]],
+  0x2b: [
+    [1, 10, 8, 1],
+    [4.5, 6, 1, 9],
+  ],
+  0xb7: [[4, 9.5, 2, 2]],
+}
+
+/** The crab as a vector picture, for a surface that draws one: the same cells, the same shapes. */
+const avatarSvg = (cells: AvatarCell[]) => {
+  const rect = (x: number, y: number, w: number, h: number, hex: string | undefined) =>
+    hex === undefined ? [] : [`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${hex}"/>`]
+  const shapes = cells.flatMap((one, at) => {
+    const x = (at % AVATAR_COLUMNS) * CELL_W
+    const y = Math.floor(at / AVATAR_COLUMNS) * CELL_H
+    const mask = MASKS[one.glyph]
+    // A quadrant block: each quarter in its own color, the ground left bare.
+    if (mask !== undefined) {
+      return [...mask].flatMap((bit, quarter) =>
+        rect(x + (quarter % 2) * (CELL_W / 2), y + Math.floor(quarter / 2) * (CELL_H / 2), CELL_W / 2, CELL_H / 2, bit === '1' ? one.fore : one.back),
+      )
+    }
+
+    return [
+      ...rect(x, y, CELL_W, CELL_H, one.back),
+      ...(FINE_SHAPES[one.glyph] ?? []).flatMap(([left, top, w, h]) => rect(x + left, y + top, w, h, one.fore)),
+    ]
+  })
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${AVATAR_COLUMNS * CELL_W} ${AVATAR_ROWS * CELL_H}" width="36" height="25" shape-rendering="crispEdges">` +
+    shapes.join('') +
+    '</svg>'
+  )
+}
 
 /** A session's worth of agents made up whole, for showing the pane full. */
 const demoAgents = (now: number): AgentRow[] => [
@@ -4734,14 +4812,14 @@ export const register: Register = on => {
     const shown = lines.slice(0, kept)
 
     const avatar = (key: string, tier: Tier | null, isPlanned: boolean) => {
-      const pixels = avatarPixels(tier, isPlanned, tone.card)
+      const cells = avatarGlyphs(tier, isPlanned, tone.card)
 
       return (
         <Box flexShrink={0} width={isCells ? AVATAR_COLUMNS : undefined}>
           {Raster !== undefined ? (
-            <Raster key={key} columns={AVATAR_COLUMNS} rows={AVATAR_ROWS} cells={avatarCells(pixels, tone.card)} />
+            <Raster key={key} columns={AVATAR_COLUMNS} rows={AVATAR_ROWS} cells={avatarCells(cells, tone.card)} />
           ) : (
-            Svg !== undefined && <Svg source={avatarSvg(pixels)} alt="agent" width={33} height={24} />
+            Svg !== undefined && <Svg source={avatarSvg(cells)} alt="agent" width={36} height={25} />
           )}
         </Box>
       )

@@ -793,7 +793,7 @@ const launch = async ($: Engine, description: string) => {
   return started.deny === undefined ? (started.agentId ?? '') : ''
 }
 
-const step = async ($: Engine, agentId: string, usage: TurnUsage, effort: 'xhigh' | 'high' | 'low' = 'xhigh') => {
+const step = async ($: Engine, agentId: string, usage: TurnUsage, effort: 'xhigh' | 'high' | 'medium' | 'low' = 'xhigh') => {
   stepped.set(agentId, usage)
   const stream = $.turn.step({ turnId: `t-${agentId}`, index: 0, model: usage.model, effort, messageCount: 3, agentId })
   for await (const _chunk of stream) {
@@ -882,8 +882,8 @@ test('a spawned subagent and its steps draw a running row: tier, model, context,
   expect(await pane.find({ text: '●' })).toBeDefined()
   const avatar = await pane.find({ key: 'agent:ava:a1' })
   expect(avatar?.type).toBe('Raster')
-  expect(avatar?.props.columns).toBe(11)
-  expect(avatar?.props.rows).toBe(4)
+  expect(avatar?.props.columns).toBe(9)
+  expect(avatar?.props.rows).toBe(3)
 })
 
 test('a finished subagent moves to Terminés with a check, a failed one with a cross', async ($, on) => {
@@ -1102,12 +1102,12 @@ test('under an ansi theme the avatar is still drawn, on the terminal default col
   const avatar = await pane.find({ key: 'agent:ava:a1' })
 
   expect(avatar?.type).toBe('Raster')
-  expect(avatar?.props.columns).toBe(11)
-  expect(avatar?.props.rows).toBe(4)
+  expect(avatar?.props.columns).toBe(9)
+  expect(avatar?.props.rows).toBe(3)
 
   // base64 of u32 triplets: 0x01000000 little-endian is the bytes 00 00 00 01.
   const words = cellWords(avatar?.props.cells)
-  expect(words.length).toBe(132)
+  expect(words.length).toBe(81)
   expect(words.filter(word => word === 0x01000000).length).toBeGreaterThan(0)
 })
 
@@ -1158,7 +1158,7 @@ test('on the desktop the avatar is a crisp Svg, and the mobile gets none', async
   }
   walk(await (await tallPane($, 'desktop')).drawn())
 
-  expect(sources.filter(one => /viewBox="0 0 11 8"/.test(one) && /crispEdges/.test(one))).toHaveLength(1)
+  expect(sources.filter(one => /viewBox="0 0 90 63"/.test(one) && /crispEdges/.test(one))).toHaveLength(1)
 })
 
 test('the demo fills the agents: one running, two finished, planned tasks that wait on others', async ($, on) => {
@@ -1296,7 +1296,7 @@ const seek = (tree: unknown, wanted: (node: NonNullable<Drawn>) => boolean): Non
 
 test('each tier dresses the crab in its own hat', async ($, on) => {
   engine(on)
-  for (const [title, effort] of [['Lourd', 'xhigh'], ['Soigné', 'high'], ['Léger', 'low']] as const) {
+  for (const [title, effort] of [['Lourd', 'xhigh'], ['Soigné', 'high'], ['Léger', 'low'], ['Moyen', 'medium']] as const) {
     await step($, await launch($, title), SMALL, effort)
   }
   const pane = await tallPane($)
@@ -1304,14 +1304,63 @@ test('each tier dresses the crab in its own hat', async ($, on) => {
   const heavy = await paint('a1')
   const careful = await paint('a2')
   const light = await paint('a3')
+  const medium = await paint('a4')
 
+  // The brown bonnet, its red-brown brim and the antenna's light.
   expect(heavy).toContain('#8a4a1e')
+  expect(heavy).toContain('#b4441c')
   expect(heavy).toContain('#9ccfff')
-  expect(heavy).toContain('#e5775a')
+  expect(heavy).toContain('#ec7a58')
+  // The yellow hard hat, its orange badge and the pale spark.
   expect(careful).toContain('#f2c230')
+  expect(careful).toContain('#c27800')
+  expect(careful).toContain('#b8cce0')
   expect(careful).not.toContain('#8a4a1e')
+  // The grey hat, its blue band and the cigar's ember.
+  expect(medium).toContain('#b0b0b0')
+  expect(medium).toContain('#2f62b8')
+  expect(medium).toContain('#e0a640')
+  // The green cap, the mast and the checkered flag.
   expect(light).toContain('#1f8f62')
+  expect(light).toContain('#9a9a9a')
+  expect(light).toContain('#202020')
   expect(light).not.toContain('#f2c230')
+})
+
+/** The glyph of each cell of a Raster. */
+const glyphsOf = (cells: unknown) => cellWords(cells).filter((_word, at) => at % 3 === 0)
+
+/** Block elements (quadrants, halves, eighths), the space, the spark's plus and the bonnet's speck. */
+const AVATAR_GLYPHS = (code: number) => code === 0x20 || code === 0x2b || code === 0xb7 || (code >= 0x2580 && code <= 0x259f)
+const QUADRANTS = [0x2596, 0x2597, 0x2598, 0x2599, 0x259a, 0x259b, 0x259c, 0x259d, 0x259e, 0x259f]
+
+test('every avatar cell is a block, a space, a plus or a dot, quadrants drawing its legs', async ($, on) => {
+  engine(on)
+  for (const [title, effort] of [['Lourd', 'xhigh'], ['Soigné', 'high'], ['Moyen', 'medium'], ['Léger', 'low']] as const) {
+    await step($, await launch($, title), SMALL, effort)
+  }
+  const pane = await tallPane($)
+
+  for (const id of ['a1', 'a2', 'a3', 'a4']) {
+    const glyphs = glyphsOf((await pane.find({ key: `agent:ava:${id}` }))?.props.cells)
+    expect(glyphs).toHaveLength(27)
+    expect(glyphs.filter(code => !AVATAR_GLYPHS(code))).toEqual([])
+    // Half a column wide, the legs and the eyes need quarter cells: half blocks alone cannot draw them.
+    expect(glyphs.some(code => QUADRANTS.includes(code))).toBe(true)
+  }
+})
+
+test('an unfolded agent wears a three-row avatar beside its title, meta and stats, its bar beneath them', async ($, on) => {
+  engine(on)
+  await step($, await launch($, 'Trois rangées'), BIG)
+  const pane = await tallPane($)
+
+  const line = seek(await pane.drawn(), node => node.props?.key === 'agents:row:a1')
+  const [left, column] = (line?.children ?? []) as Drawn[]
+  expect(seek(left, node => node.type === 'Raster')?.props?.rows).toBe(3)
+  // Title, meta, stats, then the bar: four rows, the avatar's column empty on the fourth.
+  expect(column?.children).toHaveLength(4)
+  expect(seek(column, node => node.type === 'Raster')).toBeUndefined()
 })
 
 test('a planned task wears the bare crab, faded, and its two lines are centered', async ($, on) => {
@@ -1320,14 +1369,16 @@ test('a planned task wears the bare crab, faded, and its two lines are centered'
   const demo = await tallPane($)
   const planned = rasterKeys(await demo.drawn()).filter(key => key.startsWith('agent:ava:todo-'))
   expect(planned.length).toBeGreaterThan(0)
-  const hats = ['#8a4a1e', '#9ccfff', '#f2c230', '#1f8f62', '#b4441c', '#d99a10', '#2f62b8']
+  const hats = ['#8a4a1e', '#9ccfff', '#f2c230', '#1f8f62', '#b4441c', '#d99a10', '#2f62b8', '#b0b0b0', '#c27800']
   const row = seek(await demo.drawn(), node => String(node.props?.key).startsWith('agents:todo:'))
   expect(row?.children?.some(child => (child as Drawn)?.props?.justifyContent === 'center')).toBe(true)
   for (const key of planned) {
-    const colors = paintOf((await demo.find({ key }))?.props.cells)
+    const avatar = await demo.find({ key })
+    expect(avatar?.props.rows).toBe(3)
+    const colors = paintOf(avatar?.props.cells)
     expect(colors.size).toBeGreaterThan(0)
     for (const hat of hats) expect(colors).not.toContain(hat)
-    expect(colors).not.toContain('#e5775a')
+    expect(colors).not.toContain('#ec7a58')
   }
 })
 
