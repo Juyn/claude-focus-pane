@@ -911,16 +911,19 @@ test('r folds the rows to one line each, t hides the finished', async ($, on) =>
   expect(await pane.find({ text: /Déjà rendu/ })).toBeUndefined()
 })
 
-test('a short pane folds the agents, then keeps the first ones and counts the rest', async ($, on) => {
+test('a short pane folds the agents, then keeps the running ones and counts the finished', async ($, on) => {
   await start($, on)
   for (let at = 1; at <= 8; at += 1) {
     const id = await launch($, `Agent ${at}`)
     await step($, id, SMALL)
+    // The first five are over: a running agent is never cut for room, a finished one is.
+    if (at <= 5) await finish($, id, 'answer')
   }
 
-  // With the cat in, there is no room for even one row.
+  // With the cat in, there is no room for the finished ones, and the running three stay.
   const crowded = await tallPane($, 'terminal', 24)
   expect(await crowded.find({ text: /^\+ \d+ autres$/ })).toBeDefined()
+  expect(await crowded.find({ text: /Agent 8/ })).toBeDefined()
   expect(await crowded.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 24 } })
   await crowded.unmount()
 
@@ -1099,4 +1102,43 @@ test('a request of the main loop is none of the agents: nothing is listed, no ro
 
   expect(listed).toBe(0)
   expect(await (await tallPane($)).find({ key: 'agents:cost' })).toBeUndefined()
+})
+
+/** The demo in a docked pane of `columns` by `rows`: the bound feature, 8 todos, the default cat. */
+const demoDock = async ($: Engine, on: On, columns: number, rows: number) => {
+  await start($, on)
+  await $.command.run({ command: 'mission', args: 'demo', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+
+  return $.ui.mount({
+    plugin: 'focus-pane',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: PANE,
+    props: { ...PROPS, bodyColumns: columns, placement: 'dock' as const, scroll: { offset: 0, bodyRows: rows } },
+  })
+}
+
+test('a docked pane of a normal height still draws the running agent and the totals', async ($, on) => {
+  const pane = await demoDock($, on, 100, 50)
+
+  expect(await pane.find({ text: /Conformer api-v2 au contrat R3/ })).toBeDefined()
+  const totals = (await pane.find({ key: 'agents:totals' })) ?? (await pane.find({ key: 'agents:cost' }))
+  expect(totals).toBeDefined()
+  expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 50 } })
+})
+
+test('a tall docked pane keeps the agents unfolded, with their avatars and the three cards', async ($, on) => {
+  const pane = await demoDock($, on, 100, 110)
+
+  expect(rasterKeys(await pane.drawn())).toContain('agent:ava:demo-1')
+  expect(await pane.find({ key: 'agents:cost' })).toBeDefined()
+  expect(await pane.find({ key: 'agents:totals' })).toBeUndefined()
+})
+
+test('when the cards do not fit, one quiet row gives the totals', async ($, on) => {
+  const pane = await demoDock($, on, 100, 50)
+  const totals = await pane.find({ key: 'agents:totals' })
+
+  expect(totals?.text).toMatch(/^coût ≈\$10\.3 · 14\.0M tokens · durée \d\d:\d\d$/)
+  expect(await pane.find({ key: 'agents:cost' })).toBeUndefined()
 })

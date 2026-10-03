@@ -3122,9 +3122,8 @@ const span = (ms: number) => {
 
 type Tier = 'heavy' | 'careful' | 'medium' | 'light'
 
-/** How many subagent rows the pane remembers, and the fewest rows its section keeps. */
+/** How many subagent rows the pane remembers. */
 const AGENTS_KEPT = 30
-const AGENTS_LEAST = 4
 
 const TIERS: Record<string, Tier> = { max: 'heavy', xhigh: 'heavy', high: 'careful', medium: 'medium', low: 'light' }
 
@@ -4550,10 +4549,52 @@ export const register: Register = on => {
       )
     }
 
+    type Line = { kind: 'agent'; row: AgentRow } | { kind: 'todo'; todo: Todo; rank: string }
+    // Newest first; the same moment, the one spawned last.
+    const newest = (a: { at: number; time: number }, b: { at: number; time: number }) => b.time - a.time || b.at - a.at
+    const runningL: Line[] = crew
+      .map((row, at) => ({ row, at, time: row.startedAt }))
+      .filter(one => one.row.status === 'running')
+      .sort(newest)
+      .map(one => ({ kind: 'agent', row: one.row }))
+    const doneL: Line[] = crew
+      .map((row, at) => ({ row, at, time: row.endedAt ?? row.startedAt }))
+      .filter(one => one.row.status !== 'running')
+      .sort(newest)
+      .map(one => ({ kind: 'agent', row: one.row }))
+    const plannedL: Line[] = plan.flatMap((todo, at): Line[] =>
+      todo.status === 'pending' ? [{ kind: 'todo', todo, rank: todo.id ?? String(at + 1) }] : [],
+    )
+    const lines: Line[] = [...runningL, ...(view.isDoneHidden ? [] : doneL), ...plannedL]
+    const isEmpty = crew.length === 0 && plannedL.length === 0
+    const hasCards = crew.length > 0
+
+    // What the section takes in rows, for `kept` of its lines: folded or not, with the
+    // three cards (4 rows), one row of totals, or neither when no agent ran.
+    const agentsRows = (isFolded: boolean, isCards: boolean, kept: number) => {
+      const shown = lines.slice(0, kept)
+      const titles =
+        (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
+        (doneL.length > 0 ? 1 : 0) +
+        (shown.some(one => one.kind === 'todo') ? 1 : 0)
+      const body = isFolded
+        ? shown.length
+        : shown.reduce((sum, one) => sum + (one.kind === 'agent' ? 4 : 3), 0) + Math.max(0, shown.length - 1)
+
+      return 3 + (hasCards ? (isCards ? 4 : 1) : 0) + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)
+    }
+    // What it must have before anything else gives way: every agent on one line each and the
+    // totals; with no agent, the empty state or a first planned task.
+    const agentsNeed = agentsRows(
+      true,
+      false,
+      hasCards ? runningL.length + (view.isDoneHidden ? 0 : doneL.length) : Math.min(1, lines.length),
+    )
+
     let outlines = OUTLINE_SHOWN
     let todosKept = plan.length
-    // The agents' section keeps a few rows of its own before anything else gives way.
-    const isOver = () => rowsOf(outlines, todosKept) + AGENTS_LEAST > tall
+    // The agents come first: the outlines, then the todos, give way before they lose a line.
+    const isOver = () => rowsOf(outlines, todosKept) + agentsNeed > tall
     while (isOver() && outlines > OUTLINE_LEAST) outlines -= 1
     while (isOver() && todosKept > TODOS_LEAST) todosKept -= 1
 
@@ -4609,46 +4650,19 @@ export const register: Register = on => {
 
 
     // ------------------------------------------------------------- the agents
-    type Line = { kind: 'agent'; row: AgentRow } | { kind: 'todo'; todo: Todo; rank: string }
-    // Newest first; the same moment, the one spawned last.
-    const newest = (a: { at: number; time: number }, b: { at: number; time: number }) => b.time - a.time || b.at - a.at
-    const runningL: Line[] = crew
-      .map((row, at) => ({ row, at, time: row.startedAt }))
-      .filter(one => one.row.status === 'running')
-      .sort(newest)
-      .map(one => ({ kind: 'agent', row: one.row }))
-    const doneL: Line[] = crew
-      .map((row, at) => ({ row, at, time: row.endedAt ?? row.startedAt }))
-      .filter(one => one.row.status !== 'running')
-      .sort(newest)
-      .map(one => ({ kind: 'agent', row: one.row }))
-    const plannedL: Line[] = plan.flatMap((todo, at): Line[] =>
-      todo.status === 'pending' ? [{ kind: 'todo', todo, rank: todo.id ?? String(at + 1) }] : [],
-    )
-    const lines: Line[] = [...runningL, ...(view.isDoneHidden ? [] : doneL), ...plannedL]
-    const isEmpty = crew.length === 0 && plannedL.length === 0
-    const hasCards = crew.length > 0
-
-    // What the section takes in rows, for `kept` of its lines, folded or not.
-    const agentsRows = (isFolded: boolean, kept: number) => {
-      const shown = lines.slice(0, kept)
-      const titles =
-        (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
-        (doneL.length > 0 ? 1 : 0) +
-        (shown.some(one => one.kind === 'todo') ? 1 : 0)
-      const body = isFolded
-        ? shown.length
-        : shown.reduce((sum, one) => sum + (one.kind === 'agent' ? 4 : 3), 0) + Math.max(0, shown.length - 1)
-
-      return 3 + (hasCards ? 4 : 0) + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)
-    }
-
-    // With the rows left: as they are, else one line each, else the first ones and a count.
+    // With the rows left, the richest that fits: unfolded or folded, three cards or one totals
+    // row; else folded with totals and the first lines only, the running ones kept longest.
+    // The person's fold takes the folded ones alone.
     const budget = tall - rowsOf(outlines, todosKept)
-    let isFolded = view.isFolded
+    const variants: (readonly [boolean, boolean])[] = view.isFolded
+      ? [[true, true], [true, false]]
+      : [[false, true], [false, false], [true, true], [true, false]]
+    const picked = variants.find(([folded, cards]) => agentsRows(folded, cards, lines.length) <= budget)
+    const isFolded = picked === undefined ? true : picked[0]
+    const isCards = picked === undefined ? false : picked[1]
     let kept = lines.length
-    if (!isFolded && agentsRows(false, kept) > budget) isFolded = true
-    while (kept > 0 && agentsRows(isFolded, kept) > budget) kept -= 1
+    // Past the floors the pane overflows and scrolls: a running agent is never cut for room.
+    if (picked === undefined) while (kept > runningL.length && agentsRows(true, false, kept) > budget) kept -= 1
     const shown = lines.slice(0, kept)
 
     const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
@@ -4848,7 +4862,14 @@ export const register: Register = on => {
             />
           )}
         </Box>
-        {hasCards && (
+        {hasCards && !isCards && (
+          <Box key="agents:totals" width="100%">
+            <Text {...quiet(tone, tone.card)} wrap="truncate-end">
+              {`coût ${dollars(sum(one => one.usd))} · ${compact(sum(one => one.tokens))} tokens · durée ${clock(wall)}`}
+            </Text>
+          </Box>
+        )}
+        {hasCards && isCards && (
           <Box flexDirection="row" width="100%" columnGap={1}>
             {agentCard('agents:cost', 'COÛT', dollars(sum(one => one.usd)))}
             {agentCard('agents:tokens', 'TOKENS', compact(sum(one => one.tokens)))}
