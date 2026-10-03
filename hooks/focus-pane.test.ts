@@ -903,7 +903,10 @@ test('a finished subagent moves to Terminés with a check, a failed one with a c
   expect(await pane.find({ text: 'careful' })).toBeDefined()
 })
 
-test('three cards sum the cost and the tokens of the agents, and time them on the wall clock', async ($, on) => {
+/** The agents' totals as the section's title carries them: cost, tokens, wall clock. */
+const TOTALS = /^≈\$\d+(\.\d+)? · \d+(\.\d+)?[kM]? · \d\d:\d\d$/
+
+test('the title of the agents sums their cost and their tokens, and times them on the wall clock', async ($, on) => {
   const clock = engine(on)
   const one = await launch($, 'Premier')
   await step($, one, BIG)
@@ -913,9 +916,49 @@ test('three cards sum the cost and the tokens of the agents, and time them on th
   await clock.advance(60_000)
   const pane = await tallPane($)
 
-  expect((await pane.find({ key: 'agents:cost' }))?.text).toMatch(/COÛT.*≈\$0\.12/)
-  expect((await pane.find({ key: 'agents:tokens' }))?.text).toMatch(/TOKENS.*228k/)
-  expect((await pane.find({ key: 'agents:time' }))?.text).toMatch(/DURÉE.*02:00/)
+  expect((await pane.find({ text: TOTALS }))?.text).toBe('≈$0.12 · 228k · 02:00')
+})
+
+test('no card of its own under AGENTS: the totals sit in the title, right of the todo, before r', async ($, on) => {
+  const clock = engine(on)
+  await step($, await launch($, 'Premier'), BIG)
+  await clock.advance(60_000)
+  await step($, await launch($, 'Second'), SMALL)
+  const pane = await tallPane($)
+
+  for (const key of ['agents:cost', 'agents:tokens', 'agents:time', 'agents:totals']) {
+    expect(await pane.find({ key })).toBeUndefined()
+  }
+  // The cards above stay; the section holds none of the labels the cards carried.
+  const section = JSON.stringify(seek(await pane.drawn(), node => node.props?.key === 'agents'))
+  for (const label of ['COÛT', 'TOKENS', 'DURÉE']) expect(section).not.toContain(`"${label}"`)
+  const title = seek(await pane.drawn(), node => node.props?.key === 'agents:title')
+  const kids = (title?.children ?? []) as Drawn[]
+  expect(kids).toHaveLength(2)
+  // Left: AGENTS ›. Right: the totals, then the fold button.
+  expect(JSON.stringify(kids[0])).toContain('AGENTS ›')
+  const right = (kids[1]?.children ?? []) as Drawn[]
+  expect(right).toHaveLength(2)
+  expect(String(right[0]?.children?.join(''))).toMatch(TOTALS)
+  expect(right[1]?.props?.key).toBe('agents:fold')
+})
+
+test('a very long todo title gives way, the totals and the fold button stay whole', async ($, on) => {
+  engine(on)
+  const long = `Un titre de todo interminable ${'très long '.repeat(30)}fin`
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: long, status: 'in_progress', activeForm: long }] })
+  await step($, await launch($, 'Premier'), BIG)
+  const pane = await tallPane($)
+
+  const title = seek(await pane.drawn(), node => node.props?.key === 'agents:title')
+  const flat = JSON.stringify(title)
+  expect(flat).toContain('…')
+  expect(flat).not.toContain('fin')
+  expect(flat).toContain('Un titre de todo')
+  expect((await pane.find({ text: TOTALS }))?.text).toMatch(/^≈\$0\.\d\d · 177k · \d\d:\d\d$/)
+  expect((await pane.find({ key: 'agents:fold' }))?.props.label).toBe('replier')
+  // The title is one row: the long text never wraps the totals under it.
+  expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 140 } })
 })
 
 test('a task blocked by another is planned after it, and ready once it is done', async ($, on) => {
@@ -1034,7 +1077,7 @@ test('a step from an agent the engine does not list draws no row', async ($, on)
   await step($, 'ghost', SMALL)
   const pane = await tallPane($)
 
-  expect(await pane.find({ key: 'agents:cost' })).toBeUndefined()
+  expect(await pane.find({ text: TOTALS })).toBeUndefined()
   expect(await pane.find({ text: 'aucun agent lancé' })).toBeDefined()
 })
 
@@ -1068,12 +1111,12 @@ test('under an ansi theme the avatar is still drawn, on the terminal default col
   expect(words.filter(word => word === 0x01000000).length).toBeGreaterThan(0)
 })
 
-test('no agent and no planned task says so, with no cards', async ($, on) => {
+test('no agent and no planned task says so, with no totals', async ($, on) => {
   engine(on)
   const pane = await tallPane($)
 
   expect(await pane.find({ text: 'aucun agent lancé' })).toBeDefined()
-  expect(await pane.find({ key: 'agents:cost' })).toBeUndefined()
+  expect(await pane.find({ text: TOTALS })).toBeUndefined()
   expect(await pane.find({ key: 'agents:fold' })).toBeUndefined()
   expect(await pane.find({ key: 'agents' })).toBeDefined()
 })
@@ -1177,7 +1220,7 @@ test('a request of the main loop is none of the agents: nothing is listed, no ro
   await stream.result
 
   expect(listed).toBe(0)
-  expect(await (await tallPane($)).find({ key: 'agents:cost' })).toBeUndefined()
+  expect(await (await tallPane($)).find({ text: TOTALS })).toBeUndefined()
 })
 
 /** The demo in a docked pane of `columns` by `rows`: the bound feature, 8 todos, the default cat. */
@@ -1198,26 +1241,30 @@ test('a docked pane of a normal height still draws the running agent and the tot
   const pane = await demoDock($, on, 100, 50)
 
   expect(await pane.find({ text: /Conformer api-v2 au contrat R3/ })).toBeDefined()
-  const totals = (await pane.find({ key: 'agents:totals' })) ?? (await pane.find({ key: 'agents:cost' }))
-  expect(totals).toBeDefined()
+  expect(await pane.find({ text: TOTALS })).toBeDefined()
   expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 50 } })
 })
 
-test('a tall docked pane keeps the agents unfolded, with their avatars and the three cards', async ($, on) => {
+test('a tall docked pane keeps the agents unfolded, with their avatars and the totals in the title', async ($, on) => {
   const pane = await demoDock($, on, 100, 110)
 
   expect(rasterKeys(await pane.drawn())).toContain('agent:ava:demo-1')
-  expect(await pane.find({ key: 'agents:cost' })).toBeDefined()
-  expect(await pane.find({ key: 'agents:totals' })).toBeUndefined()
+  expect(await pane.find({ text: TOTALS })).toBeDefined()
 })
 
-test('when the cards do not fit, one quiet row gives the totals', async ($, on) => {
-  const pane = await demoDock($, on, 100, 50)
-  const totals = await pane.find({ key: 'agents:totals' })
+for (const [variant, rows] of [['c', 50], ['b', VARIANT_B_ROWS], ['a', 110]] as const) {
+  test(`variant ${variant}: the totals are the title's, no row is spent on them`, async ($, on) => {
+    const pane = await demoDock($, on, 100, rows)
 
-  expect(totals?.text).toMatch(/^coût ≈\$10\.3 · 14\.0M tokens · durée \d\d:\d\d$/)
-  expect(await pane.find({ key: 'agents:cost' })).toBeUndefined()
-})
+    expect((await pane.find({ text: TOTALS }))?.text).toMatch(/^≈\$10\.3 · 14\.0M · \d\d:\d\d$/)
+    expect(await pane.find({ key: 'agents:totals' })).toBeUndefined()
+    expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: rows } })
+    // What each variant unfolds: a everything, b the agents alone, c nothing.
+    const avatars = rasterKeys(await pane.drawn()).filter(key => key.startsWith('agent:ava:'))
+    expect(avatars.some(key => key.startsWith('agent:ava:demo-'))).toBe(variant !== 'c')
+    expect(avatars.some(key => key.startsWith('agent:ava:todo-'))).toBe(variant === 'a')
+  })
+}
 
 test('the outlines and the todos give way so that every agent keeps a line', async ($, on) => {
   const pane = await demoDock($, on, 100, 60)
@@ -1231,7 +1278,7 @@ test('the outlines and the todos give way so that every agent keeps a line', asy
   walk(await pane.drawn())
 
   expect(keys.filter(key => key.startsWith('agents:row:'))).toHaveLength(3)
-  expect(await pane.find({ key: 'agents:totals' })).toBeDefined()
+  expect(await pane.find({ text: TOTALS })).toBeDefined()
 })
 
 /** The first node of a drawing that answers. */
@@ -1306,12 +1353,12 @@ test('the shared meter keeps its thin track on the cards above', async ($, on) =
   expect(await pane.find({ text: /^━*─+$/ })).toBeDefined()
 })
 
-test('where the three-line cards and the unfolded planned rows do not fit, the agents keep their avatars and the planned fold', async ($, on) => {
+test('where the unfolded planned rows do not fit, the agents keep their avatars and the planned fold', async ($, on) => {
   const pane = await demoDock($, on, 100, VARIANT_B_ROWS)
   const keys = rasterKeys(await pane.drawn())
 
   expect(keys).toContain('agent:ava:demo-1')
   expect(keys.filter(key => key.startsWith('agent:ava:todo-'))).toEqual([])
   expect(await pane.find({ text: /^◷ / })).toBeDefined()
-  expect(await pane.find({ key: 'agents:cost' })).toBeDefined()
+  expect(await pane.find({ text: TOTALS })).toBeDefined()
 })

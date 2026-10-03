@@ -4630,11 +4630,10 @@ export const register: Register = on => {
 
     const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
     // What the section takes in rows, for `kept` of its lines: its agents and its planned
-    // tasks unfolded or not, with the three cards (4 rows), one row of totals, or neither
-    // when no agent ran. An unfolded line takes its avatar's rows and a rule under it,
+    // tasks unfolded or not; the totals ride in the title row, they take none. An unfolded line takes its avatar's rows and a rule under it,
     // unless it is the last one shown.
-    type Fold = { agents: boolean; planned: boolean; cards: boolean }
-    const agentsRows = ({ agents: isAgentsFolded, planned: isPlannedFolded, cards: isCards }: Fold, kept: number) => {
+    type Fold = { agents: boolean; planned: boolean }
+    const agentsRows = ({ agents: isAgentsFolded, planned: isPlannedFolded }: Fold, kept: number) => {
       const shown = lines.slice(0, kept)
       const titles =
         (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
@@ -4646,12 +4645,12 @@ export const register: Register = on => {
         return sum + (one.kind === 'agent' || isAvatar ? 4 : 2) + (at < shown.length - 1 ? 1 : 0)
       }, 0)
 
-      return 3 + (hasCards ? (isCards ? 4 : 1) : 0) + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)
+      return 3 + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)
     }
-    // What it must have before anything else gives way: every agent on one line each and the
-    // totals; with no agent, the empty state or a first planned task.
+    // What it must have before anything else gives way: every agent on one line each; with no
+    // agent, the empty state or a first planned task.
     const agentsNeed = agentsRows(
-      { agents: true, planned: true, cards: false },
+      { agents: true, planned: true },
       hasCards ? runningL.length + (view.isDoneHidden ? 0 : doneL.length) : Math.min(1, lines.length),
     )
 
@@ -4714,26 +4713,22 @@ export const register: Register = on => {
 
 
     // ------------------------------------------------------------- the agents
-    // With the rows left, the richest that fits: (a) all unfolded with the cards, (b) the agents
-    // unfolded and the planned folded with the cards, (c) the same with a totals row, (d) all
-    // folded with the cards, (e) all folded with the totals, (f) e cut to its first lines,
-    // the running ones kept longest. The person's fold takes d, e and f alone.
+    // With the rows left, the richest that fits: (a) all unfolded, (b) the agents unfolded and
+    // the planned folded, (c) all folded, (d) c cut to its first lines, the running ones kept
+    // longest. The person's fold takes c and d alone.
     const budget = tall - rowsOf(outlines, todosKept)
     const variants: Fold[] = [
-      { agents: false, planned: false, cards: true },
-      { agents: false, planned: true, cards: true },
-      { agents: false, planned: true, cards: false },
-      { agents: true, planned: true, cards: true },
-      { agents: true, planned: true, cards: false },
-    ].slice(view.isFolded ? 3 : 0)
+      { agents: false, planned: false },
+      { agents: false, planned: true },
+      { agents: true, planned: true },
+    ].slice(view.isFolded ? 2 : 0)
     const picked = variants.find(fold => agentsRows(fold, lines.length) <= budget)
     const isAgentsFolded = picked === undefined ? true : picked.agents
     const isPlannedFolded = picked === undefined ? true : picked.planned
-    const isCards = picked === undefined ? false : picked.cards
     let kept = lines.length
     // Past the floors the pane overflows and scrolls: a running agent is never cut for room.
     if (picked === undefined) {
-      const floor: Fold = { agents: true, planned: true, cards: false }
+      const floor: Fold = { agents: true, planned: true }
       while (kept > runningL.length && agentsRows(floor, kept) > budget) kept -= 1
     }
     const shown = lines.slice(0, kept)
@@ -4885,8 +4880,11 @@ export const register: Register = on => {
       crew.length === 0
         ? 0
         : (isAllOver ? Math.max(...crew.map(one => one.endedAt ?? 0)) : now) - Math.min(...crew.map(one => one.startedAt))
-    const agentCard = (key: string, label: string, value: string) =>
-      stat(parts, tone, { key, label, value }, isCells ? Math.floor((inner - 2) / 3) : '32%')
+    // The totals ride in the title row, right before the fold button: the title of the todo
+    // in hand gives way to them, never the other way round.
+    const totals = hasCards ? `${dollars(sum(one => one.usd))} · ${compact(sum(one => one.tokens))} · ${clock(wall)}` : ''
+    const foldLabel = view.isFolded ? 'déplier' : 'replier'
+    const titleRoom = Math.max(8, inner - 'AGENTS ›'.length - 1 - (totals === '' ? 0 : totals.length + 1) - (isEmpty ? 0 : foldLabel.length + 1) - 2)
     const agentsBlock = (
       <Box
         key="agents"
@@ -4898,40 +4896,24 @@ export const register: Register = on => {
         backgroundColor={tone.card}
         paddingX={1}
       >
-        <Box flexDirection="row" width="100%" justifyContent="space-between">
-          <Text backgroundColor={tone.card} wrap="truncate-end">
-            <Text {...quiet(tone, tone.card)}>AGENTS ›</Text>
-            {inHand !== undefined && (
-              <Text bold color={tone.text} backgroundColor={tone.card}>
-                {` ${cut(inHand.content, Math.max(8, inner - 20))}`}
-              </Text>
-            )}
-          </Text>
-          {!isEmpty && (
-            <Button
-              key="agents:fold"
-              plain
-              hotkey="r"
-              label={view.isFolded ? 'déplier' : 'replier'}
-              dimColor
-              onPress={() => undefined}
-            />
-          )}
-        </Box>
-        {hasCards && !isCards && (
-          <Box key="agents:totals" width="100%">
-            <Text {...quiet(tone, tone.card)} wrap="truncate-end">
-              {`coût ${dollars(sum(one => one.usd))} · ${compact(sum(one => one.tokens))} tokens · durée ${clock(wall)}`}
+        <Box key="agents:title" flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
+          <Box flexShrink={1} flexGrow={1}>
+            <Text backgroundColor={tone.card} wrap="truncate-end">
+              <Text {...quiet(tone, tone.card)}>AGENTS ›</Text>
+              {inHand !== undefined && (
+                <Text bold color={tone.text} backgroundColor={tone.card}>
+                  {` ${cut(inHand.content, titleRoom)}`}
+                </Text>
+              )}
             </Text>
           </Box>
-        )}
-        {hasCards && isCards && (
-          <Box flexDirection="row" width="100%" columnGap={1}>
-            {agentCard('agents:cost', 'COÛT', dollars(sum(one => one.usd)))}
-            {agentCard('agents:tokens', 'TOKENS', compact(sum(one => one.tokens)))}
-            {agentCard('agents:time', 'DURÉE', clock(wall))}
+          <Box flexShrink={0} flexDirection="row" columnGap={1}>
+            {totals !== '' && <Text {...quiet(tone, tone.card)}>{totals}</Text>}
+            {!isEmpty && (
+              <Button key="agents:fold" plain hotkey="r" label={foldLabel} dimColor onPress={() => undefined} />
+            )}
           </Box>
-        )}
+        </Box>
         {isEmpty && <Text {...quiet(tone, tone.card)}>aucun agent lancé</Text>}
         {shownRunning.length > 0 && groupTitle(`En cours · ${runningL.length}`)}
         {lineNodes(shownRunning, 0)}
