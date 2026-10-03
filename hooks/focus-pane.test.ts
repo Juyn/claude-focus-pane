@@ -1070,6 +1070,8 @@ test('the pane redraws each second while an agent runs, and stops once none does
   let redraws = 0
   on('ui.invalidate', () => {
     redraws += 1
+
+    return { value: undefined }
   })
   const id = await launch($, 'Qui tourne')
   await clock.advance(3000)
