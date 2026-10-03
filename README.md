@@ -7,8 +7,6 @@ A Claude Code mod: a permanent side pane that keeps the session's context on scr
 - **Cards** — plan progress, context tokens and cost, turns, session time.
 - **Sacred Book** — the bound feature's spec and plan (status, outline, GitHub link) and its mockup.
 - **Todos** — the list the agent's `TodoWrite` wrote.
-- **Activity** — live feed of tool calls: time, tool, detail, outcome.
-- **Comments / My todo** — typed in the pane, kept per working directory across sessions.
 - **Mockups tab** — one thumbnail per screen of the bound mockup, with an open-in-browser button.
 
 It docks to the right of the transcript only under Claude Code's fullscreen renderer (`/tui fullscreen`,
@@ -106,15 +104,13 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission pet sprite` / `big` | its size: small (32 columns, 11 to 14 rows) or big (64 columns by 20 rows, three times the pixels) |
 | `/mission pet png` | the cat as a real image (64×36 frames from `assets/frames/`, 9 rows), where the terminal draws pictures (kitty graphics protocol); elsewhere it says so and falls back to `sprite`. `python3 scripts/build-frames.py` cuts the frames |
 | `/mission pet sprite` / `3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: the sprite sheet (12 rows, default), ray-marched 3D (10 rows), line art (9 rows), flat pixels (3 rows), or sent in |
-| `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity, notes — to see it full; the notes are shown, never stored |
+| `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity — to see it full |
 
-With the keyboard in the pane (click it, or `ctrl+x tab`): `a` task, `t` link, `c` comment,
-`m` mockup thumbnails, `o` open the mockup, `esc` back to the prompt.
+With the keyboard in the pane (click it, or `ctrl+x tab`): `m` mockup thumbnails, `o` open the mockup, `esc` back to the prompt.
 
 A branch that carries a ticket known to a Sacred Book README binds its feature at session start.
 A binding made with `spec` is remembered per checkout and restored at the next session there; outside
-a git checkout (a workspace root) it lasts the session only. Comments and the personal todo are
-kept per working directory everywhere.
+a git checkout (a workspace root) it lasts the session only.
 
 ## Develop
 

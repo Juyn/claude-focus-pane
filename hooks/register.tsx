@@ -9,7 +9,7 @@ import type {
   Timer,
 } from 'claude-code'
 
-import type { Board, Doc, Feature, FeedRow, Gallery, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
+import type { Doc, Feature, FeedRow, Gallery, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
 
@@ -64,7 +64,6 @@ const turn = atom({ plugin: 'focus-pane', key: 'turn' } as const, {
   startedAt: null,
   lastMs: null,
 })
-const board = atom({ plugin: 'focus-pane', key: 'board' } as const, { notes: [], chores: [], serial: 0 })
 const feature = atom({ plugin: 'focus-pane', key: 'feature' } as const, null)
 const gallery = atom({ plugin: 'focus-pane', key: 'gallery' } as const, { status: 'idle', path: null, shots: [] })
 const petStyle = atom({ plugin: 'focus-pane', key: 'petStyle' } as const, 'sprite')
@@ -72,9 +71,8 @@ const petCoat = atom({ plugin: 'focus-pane', key: 'petCoat' } as const, 'roux')
 const skin = atom({ plugin: 'focus-pane', key: 'skin' } as const, 'dark')
 const command = atom({ plugin: 'focus-pane', key: 'command' } as const, null)
 
-/** How many tool calls the feed remembers, and how many a pane shows at most. */
+/** How many tool calls the feed remembers. */
 const FEED_KEPT = 60
-const FEED_LEAST = 3
 
 /** How many headings a spec or plan card lists before it counts the rest. */
 const OUTLINE_SHOWN = 6
@@ -112,9 +110,6 @@ u=$(curl -fsS -m 10 -G -H "Authorization: Bearer $API_DEV_UNLKR" --data-urlencod
 [ -z "$u" ] && u="\${SACRED_BOOK_DIR:-$HOME/Sites/sacred-book}/$1" && [ ! -f "$u" ] && exit 1
 xdg-open "$u" >/dev/null 2>&1
 `
-
-/** The share of the pane's height the person's notes and todo take, together. */
-const DESK_SHARE = 0.3
 
 /** Numbers the feed rows: a module value, a reload only needs them unique from then on. */
 let sequence = 0
@@ -2917,22 +2912,6 @@ const detailOf = (e: object) => {
   return first.replace(/\s+/g, ' ')
 }
 
-/** The feed's badge for a tool: its name, or a short one where the name is long. */
-const SHORT: Record<string, string> = {
-  AskUserQuestion: 'Ask',
-  ToolSearch: 'Tools',
-  NotebookEdit: 'Notebook',
-  TodoWrite: 'Todo',
-  TaskCreate: 'Task',
-  TaskUpdate: 'Task',
-  TaskList: 'Task',
-  TaskGet: 'Task',
-  WebFetch: 'Fetch',
-  WebSearch: 'Search',
-  ExitPlanMode: 'Plan',
-}
-const labelOf = (tool: string) => (tool.startsWith('mcp__') ? 'MCP' : (SHORT[tool] ?? tool))
-
 /** What a tool call was given, flattened: where a path or a ticket is looked for. */
 const said = (e: object) => {
   try {
@@ -3051,22 +3030,6 @@ const TONES: Record<Skin, Tone> = {
   },
 }
 
-const FAMILIES: Record<string, Family> = {
-  Bash: 'shell',
-  Edit: 'edit',
-  Write: 'edit',
-  NotebookEdit: 'edit',
-  Read: 'read',
-  Grep: 'read',
-  Glob: 'read',
-  WebFetch: 'read',
-  WebSearch: 'read',
-  Agent: 'agent',
-  Task: 'agent',
-  Skill: 'agent',
-  TodoWrite: 'agent',
-}
-
 /** Which palette the `theme` row of /config asks for. */
 const skinOf = (value: unknown): Skin => {
   const name = typeof value === 'string' ? value.toLowerCase() : ''
@@ -3139,25 +3102,12 @@ const compact = (count: number) =>
       ? `${(count / 1000).toFixed(count < 100_000 ? 1 : 0)}k`
       : `${(count / 1_000_000).toFixed(1)}M`
 
-/** How long a call took, as a feed row ends: 4ms, 6.1s, 01:12. */
-const took = (ms: number) =>
-  ms < 1000 ? `${Math.round(ms)}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : clock(ms)
-
 /** How long the session has run, as a card prints it: 42s, 4m, 1h12. */
 const span = (ms: number) => {
   const minutes = Math.floor(ms / 60_000)
   if (minutes < 1) return `${Math.max(0, Math.floor(ms / 1000))}s`
 
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
-}
-
-const two = (value: number) => String(value).padStart(2, '0')
-
-/** The wall-clock time of a feed row. */
-const stamp = (at: number) => {
-  const when = new Date(at)
-
-  return `${two(when.getHours())}:${two(when.getMinutes())}:${two(when.getSeconds())}`
 }
 
 // ------------------------------------------------------------------ the parts
@@ -3491,56 +3441,6 @@ const demoFeed = (now: number): FeedRow[] =>
     ] as const
   ).map(([tool, detail, ago, ms, isError], at) => ({ id: `demo-${at}`, tool, detail, at: now - ago * 1000, ms, isError }))
 
-/** Notes and chores for a pane nobody wrote in yet. */
-const demoBoard = (now: number): Board => ({
-  notes: [
-    { id: 1, text: 'Le relevé doit paginer côté serveur, pas dans le front', at: now - 40 * 60_000 },
-    { id: 2, text: 'Attestation : attendre la réponse du métier sur le gabarit', at: now - 12 * 60_000 },
-  ],
-  chores: [
-    { id: 3, text: 'Relire la PR BFF', isDone: true, href: null },
-    { id: 4, text: 'Recette staging avec un compte centralisateur', isDone: false, href: null },
-    { id: 5, text: 'Ticket UNL-4844', isDone: false, href: 'https://linear.app/unlocker/issue/UNL-4844' },
-  ],
-  serial: 5,
-})
-
-/** The person's notes are kept per working directory, across sessions. */
-const shelf = async ($: EngineInterface) => `board:${await $.session.cwd()}`
-
-/** What `$.store` gave back, as a Board, whatever it turns out to hold. */
-const asBoard = (value: unknown): Board | null => {
-  if (!value || typeof value !== 'object') return null
-  const held = value as Record<string, unknown>
-  const notes = Array.isArray(held.notes) ? held.notes : []
-  const chores = Array.isArray(held.chores) ? held.chores : []
-
-  return {
-    notes: notes.flatMap(one => {
-      const row = one as Record<string, unknown> | null
-      const text = asText(row?.text)
-
-      return row && text ? [{ id: Number(row.id) || 0, text, at: Number(row.at) || 0 }] : []
-    }),
-    chores: chores.flatMap(one => {
-      const row = one as Record<string, unknown> | null
-      const text = asText(row?.text)
-
-      return row && text
-        ? [{ id: Number(row.id) || 0, text, isDone: row.isDone === true, href: asText(row.href) || null }]
-        : []
-    }),
-    serial: Number(held.serial) || 0,
-  }
-}
-
-/** Changes the board, then writes it to the store: the two never part. */
-const keep = async ($: EngineInterface, change: (was: Board) => Board) => {
-  await update($, board, change)
-  const now = await read($, board)
-  await $.store.set(await shelf($), now).catch(() => undefined)
-}
-
 const QUIP =
   "Tu es un chat de bureau qui regarde un agent de code travailler et commente, pince-sans-rire, " +
   'comme un documentaire animalier ou une remarque de chat. Une seule phrase très courte, de ' +
@@ -3597,12 +3497,6 @@ export const register: Register = on => {
     // A reload lands in the middle of a turn as well as between two: the turn
     // atom outlives it and says which, where a fresh module would guess rest.
     pace($, (await read($, turn)).isRunning)
-
-    const saved = await shelf($)
-      .then(key => $.store.get(key))
-      .then(asBoard)
-      .catch(() => null)
-    if (saved !== null) await update($, board, () => saved)
 
 
     const branch = await $.process
@@ -3723,8 +3617,6 @@ export const register: Register = on => {
         summary: was.summary ?? 'Brancher le relevé de compte sur le SDK back-office',
         isPinned: true,
       }))
-      // Shown, never stored: the person's own notes are left as they are on disk.
-      await update($, board, was => (was.notes.length + was.chores.length > 0 ? was : demoBoard(now)))
 
       return { text: `Focus pane: données de démonstration (${fake.length} étapes).` }
     }
@@ -4023,51 +3915,12 @@ export const register: Register = on => {
     return ran
   })
 
-  // A note or a chore typed in the pane: Enter files it, the field starts over.
-  on('ui.input', { requestId: PANE }, async ($, e, next) => {
-    const text = e.value.trim()
-    if (e.kind !== 'submit' || !text) return next(e)
-
-    if (e.element.startsWith('note:new')) {
-      const at = await $.clock.now()
-      await keep($, was => ({
-        ...was,
-        serial: was.serial + 1,
-        notes: [...was.notes, { id: was.serial + 1, text, at }],
-      }))
-    } else if (e.element.startsWith('chore:new')) {
-      await keep($, was => ({
-        ...was,
-        serial: was.serial + 1,
-        chores: [...was.chores, { id: was.serial + 1, text, isDone: false, href: null }],
-      }))
-    } else if (e.element.startsWith('chore:link')) {
-      const href = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`
-      await keep($, was => ({
-        ...was,
-        serial: was.serial + 1,
-        chores: [
-          ...was.chores,
-          { id: was.serial + 1, text: href.replace(/^https?:\/\//, ''), isDone: false, href },
-        ],
-      }))
-    }
-
-    return next(e)
-  })
-
   on('ui.press', async ($, e, next) => {
     if (e.requestId !== PANE && e.requestId !== GALLERY) return next(e)
-    const [kind, verb, rest] = e.element.split(':')
-    const id = Number(rest ?? verb)
+    const [kind, verb] = e.element.split(':')
 
     if (kind === 'bao' && verb === 'plant') {
       baoPlant()
-    } else if (kind === 'focus') {
-      // a, t, c: the hotkey puts the caret in its field, the person types.
-      const { serial } = await read($, board)
-      const field = verb === 'chore' ? 'chore:new' : verb === 'link' ? 'chore:link' : 'note:new'
-      await $.ui.focus({ requestId: PANE, key: `${field}:${serial}` }).catch(() => undefined)
     } else if (kind === 'gallery' && verb === 'open') {
       await $.ui.open({ id: GALLERY, title: 'Maquettes', focus: true }).catch(() => undefined)
       void loadGallery($).catch(() => undefined)
@@ -4075,11 +3928,7 @@ export const register: Register = on => {
       await $.ui.open({ id: PANE, title: 'Focus', focus: true }).catch(() => undefined)
     }
 
-    if (kind === 'note' && verb === 'drop') {
-      await keep($, was => ({ ...was, notes: was.notes.filter(one => one.id !== id) }))
-    } else if (kind === 'chore' && verb === 'clear') {
-      await keep($, was => ({ ...was, chores: was.chores.filter(one => !one.isDone) }))
-    } else if (kind === 'design' && verb === 'open') {
+    if (kind === 'design' && verb === 'open') {
       const design = (await read($, feature))?.docs.find(one => one.kind === 'design')
       if (design) {
         // Detached: the press returns now, the browser opens when curl answers.
@@ -4090,11 +3939,6 @@ export const register: Register = on => {
           })
           .catch(() => $.ui.toast('focus-pane: maquette introuvable'))
       }
-    } else if (kind === 'chore' && verb === 'toggle') {
-      await keep($, was => ({
-        ...was,
-        chores: was.chores.map(one => (one.id === id ? { ...one, isDone: !one.isDone } : one)),
-      }))
     }
 
     return next(e)
@@ -4103,8 +3947,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const table = $.ui.resolve(e)
     const { Box, Text, Button } = table
-    // A phone has no text field: there the two lists are read, not written.
-    const Input = 'Input' in table ? table.Input : undefined
     const Link = 'Link' in table ? table.Link : undefined
     const room = Math.max(24, e.props.bodyColumns) - 2
     const seated: Focus = await read($, focus)
@@ -4112,7 +3954,6 @@ export const register: Register = on => {
     const rows: FeedRow[] = await read($, feed)
     const state: TurnState = await read($, turn)
     const spent: Usage = await read($, usage)
-    const kept: Board = await read($, board)
     const bound: Feature | null = await read($, feature)
     const tone = TONES[await read($, skin)]
     const mine = await read($, command)
@@ -4231,7 +4072,6 @@ export const register: Register = on => {
     // the blocks there take a share of their row and flex, instead of a number.
     const isCells = e.surface === 'terminal'
     const cardShare = `${Math.floor(100 / perRow) - 2}%`
-    const halfShare = isWide ? '49%' : '100%'
     const cards = (
       <Box flexDirection="column" width="100%">
         {[0, perRow]
@@ -4248,18 +4088,11 @@ export const register: Register = on => {
 
     // ---------------------------------------------------------------- the fit
     // The pane is exactly as tall as its window: every block is counted in rows,
-    // and what does not fit gives way in this order — the feed down to a few rows,
-    // the outlines, the bottom lists' reserved share, then the todo list.
+    // and what does not fit gives way in this order: the outlines, then the todo list.
     const tall = e.props.scroll.bodyRows
     const papers = (bound?.docs ?? []).filter(one => one.kind !== 'design')
     const design = bound?.docs.find(one => one.kind === 'design')
     const paperWidth = isWide && papers.length > 1 ? Math.floor((room - 1) / 2) : room
-    const choresDone = kept.chores.filter(one => one.isDone).length
-    const half = isWide ? Math.floor((room - 1) / 2) : room
-    const noteLines = (text: string) => Math.max(1, Math.ceil(text.length / Math.max(8, half - 14)))
-    const notesRows =
-      4 + Math.max(1, kept.notes.reduce((sum, one) => sum + noteLines(one.text), 0))
-    const choresRows = 5 + Math.max(1, kept.chores.length) + (choresDone > 0 ? 1 : 0)
     const briefLines = (said: string | null) =>
       Math.min(BRIEF_LINES, Math.max(1, Math.ceil((said ?? '').length / briefWidth)))
 
@@ -4309,7 +4142,7 @@ export const register: Register = on => {
       svgDrawn = svgKey()
     }
 
-    const rowsOf = (outlines: number, todosKept: number, share: number) => {
+    const rowsOf = (outlines: number, todosKept: number) => {
       const paperRows = (one: Doc) =>
         Math.min(one.outline.length, outlines) + (one.outline.length > outlines ? 1 : 0) + 4
       const book =
@@ -4319,10 +4152,6 @@ export const register: Register = on => {
             (paperWidth === room
               ? papers.reduce((sum, one) => sum + paperRows(one), 0)
               : Math.max(0, ...papers.map(paperRows)))
-      const block = isWide ? share : Math.floor(share / 2)
-      const desk = isWide
-        ? Math.max(notesRows, choresRows, block)
-        : Math.max(notesRows, block) + Math.max(choresRows, block)
       const list = plan.length === 0 ? 0 : 3 + Math.min(plan.length, todosKept)
 
       return (
@@ -4331,8 +4160,6 @@ export const register: Register = on => {
         (isWide ? 6 : 12) + // cards
         book +
         list +
-        3 + // the feed's frame and heading
-        desk +
         petRows +
         1 // legend
       )
@@ -4340,13 +4167,9 @@ export const register: Register = on => {
 
     let outlines = OUTLINE_SHOWN
     let todosKept = plan.length
-    let share = Math.round(tall * DESK_SHARE)
-    const isOver = () => rowsOf(outlines, todosKept, share) + FEED_LEAST > tall
+    const isOver = () => rowsOf(outlines, todosKept) > tall
     while (isOver() && outlines > OUTLINE_LEAST) outlines -= 1
-    while (isOver() && share > 0) share -= 1
     while (isOver() && todosKept > TODOS_LEAST) todosKept -= 1
-    const shown = Math.max(1, Math.min(FEED_KEPT, tall - rowsOf(outlines, todosKept, share)))
-    const blockRows = isWide ? share : Math.floor(share / 2)
 
     // The todo list's window, when it had to give rows: it follows the step in hand.
     const doing = Math.max(0, plan.findIndex(one => one.status === 'in_progress'))
@@ -4398,7 +4221,6 @@ export const register: Register = on => {
       </Box>
     )
 
-    // --------------------------------------------------------------- the feed
     // ------------------------------------------------------------ sacred book
     const status = (said: string | null) =>
       said === null
@@ -4494,180 +4316,9 @@ export const register: Register = on => {
       </Box>
     )
 
-    const badgeWidth = 8
-    const event = (one: FeedRow) => {
-      const isLive = one.ms === null
-      const ground = one.isError ? tone.badBackground : tone.card
-      const badge = tone.badges[FAMILIES[one.tool] ?? 'other']
-      const ending = isLive
-        ? `● ${clock(now - one.at)}`
-        : one.isError
-          ? '✗ ÉCHEC'
-          : `✓ ${took(one.ms ?? 0)}`
-      const free = inner - 8 - 2 - (badgeWidth + 2) - 2 - ending.length - 2
-
-      return (
-        <Box
-          key={`event:${one.id}`}
-          flexDirection="row"
-          width="100%"
-          justifyContent="space-between"
-          backgroundColor={ground}
-        >
-          <Text backgroundColor={ground} wrap="truncate-end">
-            <Text {...quiet(tone, ground)}>{`${stamp(one.at)}  `}</Text>
-            {chip(parts, cut(labelOf(one.tool), badgeWidth).padEnd(badgeWidth), badge.background, badge.text)}
-            <Text color={one.isError ? tone.bad : tone.text} bold={isLive} backgroundColor={ground}>
-              {`  ${cut(one.detail || '—', Math.max(6, free))}`}
-            </Text>
-          </Text>
-          <Text
-            bold={one.isError}
-            color={isLive ? tone.mark : one.isError ? tone.bad : tone.ok}
-            backgroundColor={ground}
-          >
-            {ending}
-          </Text>
-        </Box>
-      )
-    }
-    const activity = (
-      <Box
-        key="feed"
-        flexDirection="column"
-        width="100%"
-        flexGrow={1}
-        borderStyle="round"
-        borderColor={tone.frame}
-        backgroundColor={tone.card}
-        paddingX={1}
-      >
-        {heading(
-          parts,
-          tone,
-          'ACTIVITÉ',
-          `${rows.length} ÉVÉNEMENT${rows.length > 1 ? 'S' : ''}`,
-        )}
-        {rows.length === 0 ? (
-          <Text {...quiet(tone, tone.card)}>aucune activité pour le moment</Text>
-        ) : (
-          rows.slice(0, shown).map(event)
-        )}
-      </Box>
-    )
-
-    // ------------------------------------------- the person's notes and todo
-    const field = (key: string, placeholder: string) =>
-      Input !== undefined && (
-        <Input key={key} placeholder={placeholder} submitLabel="ajouter" onSubmit={() => undefined} />
-      )
-    const comments = (
-      <Box
-        key="notes"
-        flexDirection="column"
-        width={isCells ? half : halfShare}
-        minHeight={blockRows}
-        flexGrow={isCells ? 0 : 1}
-        flexShrink={isCells ? 0 : 1}
-        borderStyle="round"
-        borderColor={tone.frame}
-        backgroundColor={tone.card}
-        paddingX={1}
-      >
-        <Box flexDirection="row" width="100%" justifyContent="space-between">
-          <Text {...quiet(tone, tone.card)}>{`COMMENTAIRES ›  ${kept.notes.length}`}</Text>
-          {Input !== undefined && (
-            <Button key="focus:note" plain hotkey="c" label="commenter" onPress={() => undefined} />
-          )}
-        </Box>
-        {kept.notes.length === 0 && <Text {...quiet(tone, tone.card)}>aucun commentaire</Text>}
-        {kept.notes.map(one => (
-          <Box flexDirection="row" width="100%" columnGap={1}>
-            <Box flexShrink={0}>
-              <Text {...quiet(tone, tone.card)}>{stamp(one.at).slice(0, 5)}</Text>
-            </Box>
-            <Box flexGrow={1} flexShrink={1}>
-              <Text color={tone.text} backgroundColor={tone.card} wrap="wrap">
-                {one.text}
-              </Text>
-            </Box>
-            <Box flexShrink={0}>
-              <Button key={`note:drop:${one.id}`} plain label="×" dimColor onPress={() => undefined} />
-            </Box>
-          </Box>
-        ))}
-        <Box flexGrow={1} />
-        {field(`note:new:${kept.serial}`, 'ajouter un commentaire…')}
-      </Box>
-    )
-    const chores = (
-      <Box
-        key="chores"
-        flexDirection="column"
-        width={isCells ? half : halfShare}
-        minHeight={blockRows}
-        flexGrow={isCells ? 0 : 1}
-        flexShrink={isCells ? 0 : 1}
-        borderStyle="round"
-        borderColor={tone.frame}
-        backgroundColor={tone.card}
-        paddingX={1}
-      >
-        <Box flexDirection="row" width="100%" justifyContent="space-between">
-          <Text {...quiet(tone, tone.card)}>
-            {`MA TODO ›  ${kept.chores.length > 0 ? `${choresDone}/${kept.chores.length}` : '0'}`}
-          </Text>
-          {Input !== undefined && (
-            <Box flexDirection="row" columnGap={2}>
-              <Button key="focus:chore" plain hotkey="a" label="tâche" onPress={() => undefined} />
-              <Button key="focus:link" plain hotkey="t" label="lien" onPress={() => undefined} />
-            </Box>
-          )}
-        </Box>
-        {kept.chores.length === 0 && <Text {...quiet(tone, tone.card)}>rien à faire de ton côté</Text>}
-        {kept.chores.map(one =>
-          one.href !== null && Link !== undefined ? (
-            <Box flexDirection="row" width="100%" columnGap={1}>
-              <Button
-                key={`chore:toggle:${one.id}`}
-                plain
-                label={one.isDone ? MARK.completed : MARK.pending}
-                dimColor={one.isDone}
-                onPress={() => undefined}
-              />
-              <Link href={one.href} label={`${cut(one.text, Math.max(8, half - 10))} ↗`} />
-            </Box>
-          ) : (
-            <Button
-              key={`chore:toggle:${one.id}`}
-              plain
-              label={`${one.isDone ? MARK.completed : MARK.pending} ${cut(one.text, Math.max(8, half - 6))}`}
-              dimColor={one.isDone}
-              onPress={() => undefined}
-            />
-          ),
-        )}
-        {choresDone > 0 && (
-          <Button key="chore:clear" plain label="retirer les terminées" dimColor onPress={() => undefined} />
-        )}
-        <Box flexGrow={1} />
-        {field(`chore:new:${kept.serial}`, 'ajouter une tâche…')}
-        {field(`chore:link:${kept.serial}`, 'coller un lien…')}
-      </Box>
-    )
-    const desk = (
-      <Box flexDirection={isWide ? 'row' : 'column'} width="100%" columnGap={1}>
-        {comments}
-        {chores}
-      </Box>
-    )
-
     const footer = legend(parts, tone, [
       // Seated above the prompt, not docked: only the fullscreen renderer docks a pane, and the person alone switches to it.
       ...(e.props.placement === 'inline' && e.surface === 'terminal' ? ([['/tui fullscreen', 'Pane à droite']] as const) : []),
-      ['a', 'Tâche'],
-      ['t', 'Lien'],
-      ['c', 'Commenter'],
       ...(design ? ([['m', 'Miniatures'], ['o', 'Maquette']] as const) : []),
       ...(isBao ? ([['b', 'Bambou']] as const) : []),
       ['ctrl+x tab', 'Clavier'],
@@ -4688,8 +4339,7 @@ export const register: Register = on => {
         {cards}
         {book}
         {todoList}
-        {activity}
-        {desk}
+        <Box flexGrow={1} />
         {style === 'pixel' && Raster !== undefined && tone.panel !== undefined && tone.text !== undefined && (
           <Raster
             key="pet"

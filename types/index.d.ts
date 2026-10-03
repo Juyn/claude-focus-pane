@@ -72,15 +72,6 @@ export type Gallery = {
   shots: { id: string; title: string; columns: number; rows: number; cells: string }[]
 }
 
-/** What the person wrote in the pane, kept per working directory in `$.store`. */
-export type Board = {
-  notes: { id: number; text: string; at: number }[]
-  /** `href` set: the chore is a link, opened from its row. */
-  chores: { id: number; text: string; isDone: boolean; href: string | null }[]
-  /** The last id handed out; it also renews the two fields once one is filed. */
-  serial: number
-}
-
 /** The session's own counters, as `$.session.usage()` last reported them. */
 export type Usage = {
   tokens: number | null
@@ -111,7 +102,6 @@ declare module 'claude-code' {
       todos: Todo[]
       feed: FeedRow[]
       usage: Usage
-      board: Board
       feature: Feature | null
       gallery: Gallery
       petStyle: PetStyle

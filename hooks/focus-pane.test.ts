@@ -137,13 +137,12 @@ const mounted = ($: Engine, bodyColumns: number) =>
 
 const CARDS = ['card:PLAN', 'card:CONTEXTE', 'card:TOURS', 'card:TEMPS']
 
-test('one view draws the brief, the four cards and the feed, at every width', async ($, on) => {
+test('one view draws the brief and the four cards, at every width', async ($, on) => {
   engine(on)
 
   for (const columns of [120, 48]) {
     const pane = await mounted($, columns)
     for (const key of CARDS) expect(await pane.find({ key })).toBeDefined()
-    expect(await pane.find({ key: 'feed' })).toBeDefined()
     expect(await pane.find({ text: ' MISSION ' })).toBeDefined()
     await pane.unmount()
   }
@@ -161,17 +160,6 @@ test('the context card prints what the session reports', async ($, on) => {
   expect(await pane.find({ text: '$1.92' })).toBeDefined()
   expect(await pane.find({ text: '42% de 200k' })).toBeDefined()
   expect(await pane.find({ text: '4m' })).toBeDefined()
-})
-
-test('a tool call lands in the feed with its badge and how it ended', async ($, on) => {
-  engine(on)
-  await $.tool.call({ tool: 'Bash', command: 'git push --force origin main' })
-  const pane = await wide($)
-
-  expect(await pane.find({ text: /git push --force origin main/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: ' Bash     ' })).toBeDefined()
-  expect(await pane.find({ text: '✗ ÉCHEC' })).toBeDefined()
-  expect(await pane.find({ text: /aucune activité/ })).toBeUndefined()
 })
 
 test('switching to a light theme repaints the brand mark', async ($, on) => {
@@ -206,38 +194,17 @@ test('the pane is always as tall as its window', async ($, on) => {
   })
 
   expect(await pane.drawn()).toMatchObject({ type: 'Box', props: { minHeight: 57 } })
-  expect((await pane.find({ key: 'feed' }))?.props.flexGrow).toBe(1)
-  expect((await pane.find({ key: 'notes' }))?.props.minHeight).toBe(17)
-  expect((await pane.find({ key: 'chores' }))?.props.minHeight).toBe(17)
 })
 
-test('a comment and a chore typed in the pane are filed, kept and worked', async ($, on) => {
+test('the pane no longer draws a feed, comments or a todo of its own', async ($, on) => {
   engine(on)
-  const stored: Record<string, unknown> = {}
-  on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
-  on('store.set', ($$, e) => {
-    stored[e.key] = e.value
-
-    return { value: undefined }
-  })
   const pane = await wide($)
-  expect(await pane.find({ text: 'aucun commentaire' })).toBeDefined()
 
-  await pane.input({ key: 'note:new:0', text: 'vérifier le contraste en thème clair' })
-  await pane.input({ key: 'chore:new:1', text: 'relire la PR' })
-
-  expect(await pane.find({ text: 'vérifier le contraste en thème clair' })).toBeDefined()
-  expect(await pane.find({ key: 'chore:toggle:2' })).toBeDefined()
-  expect(await pane.find({ key: 'chore:clear' })).toBeUndefined()
-  expect(stored['board:/home/xavier/Sites']).toMatchObject({ notes: [{ id: 1 }], chores: [{ id: 2, isDone: false }] })
-
-  await pane.press({ key: 'chore:toggle:2' })
-  expect(await pane.find({ key: 'chore:clear' })).toBeDefined()
-  await pane.press({ key: 'chore:clear' })
-  expect(await pane.find({ key: 'chore:toggle:2' })).toBeUndefined()
-
-  await pane.press({ key: 'note:drop:1' })
-  expect(await pane.find({ text: 'aucun commentaire' })).toBeDefined()
+  for (const key of ['feed', 'notes', 'chores', 'focus:note', 'focus:chore', 'focus:link']) {
+    expect(await pane.find({ key })).toBeUndefined()
+  }
+  const legend = (await pane.find({ key: 'legend' }))?.text ?? ''
+  for (const word of ['Commenter', 'Tâche', 'Lien']) expect(legend).not.toContain(word)
 })
 
 const README = [
@@ -358,7 +325,7 @@ test('the pane names the command it was actually granted', async ($, on) => {
 
   const pane = await wide($)
   expect(await pane.find({ text: '  /mission' })).toBeDefined()
-  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite  a Tâche  t Lien  c Commenter  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
+  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
 })
 
 test('a reload registers the remembered command again', async ($, on) => {
@@ -381,22 +348,6 @@ test('a reload registers the remembered command again', async ($, on) => {
   await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
 
   expect(asked).toEqual(['mission', 'mission'])
-})
-
-test('t files a link in the todo, a t c are the hotkeys of their fields', async ($, on) => {
-  engine(on)
-  on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
-  on('store.set', () => ({ value: undefined }))
-  const pane = await wide($)
-
-  expect((await pane.find({ key: 'focus:chore' }))?.props.hotkey).toBe('a')
-  expect((await pane.find({ key: 'focus:link' }))?.props.hotkey).toBe('t')
-  expect((await pane.find({ key: 'focus:note' }))?.props.hotkey).toBe('c')
-
-  await pane.input({ key: 'chore:link:0', text: 'linear.app/unlocker/issue/UNL-4844' })
-  const link = await pane.find({ type: 'Link' })
-  expect(link?.props.href).toBe('https://linear.app/unlocker/issue/UNL-4844')
-  expect(await pane.find({ key: 'chore:toggle:1' })).toBeDefined()
 })
 
 test('m opens the mockups tab, which draws a thumbnail a screen and keeps the open button', async ($, on) => {
@@ -551,23 +502,6 @@ test('a ticket in a prompt binds its feature, whatever its case', async ($, on) 
 
   expect(await pane.find({ key: 'doc:plan' })).toBeDefined()
   expect(await pane.find({ text: ' UNL-4844 ' })).toBeDefined()
-})
-
-test('the feed names an MCP call by its server and tool, a shell call by its purpose', async ($, on) => {
-  engine(on)
-  await $.tool.call({ tool: 'mcp__linear-unlocker__save_issue' as never, id: 'UNL-4854' } as never)
-  await $.tool.call({ tool: 'Bash', command: 'D=/tmp/x; psql "$D" -f s.sql', description: 'Simuler le script SQL' })
-  const pane = await $.ui.mount({
-    plugin: 'focus-pane',
-    surface: 'terminal',
-    component: 'Pane',
-    requestId: PANE,
-    props: { ...PROPS, bodyColumns: 100, scroll: { offset: 0, bodyRows: 60 } },
-  })
-
-  expect(await pane.find({ type: 'Text', text: ' MCP      ' })).toBeDefined()
-  expect(await pane.find({ text: /linear-unlocker › save_issue/ })).toBeDefined()
-  expect(await pane.find({ text: /Simuler le script SQL/ })).toBeDefined()
 })
 
 const start = async ($: Engine, on: On) => {
