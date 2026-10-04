@@ -776,12 +776,15 @@ const OPUS = 'claude-opus-5-5'
 
 /**
  * A docked height where the agents unfold but the planned tasks fold: settled by the probe of
- * the fit (the demo: c below 76 rows, b from 76, a from 90).
+ * the fit (the demo: c below 78 rows, b from 78, a from 93, each group's first unfolded line taking an empty row).
  */
 const VARIANT_B_ROWS = 85
 
-/** The lowest docked height where the demo's five planned tasks unfold too, three rows and a rule each. */
-const VARIANT_A_ROWS = 90
+/**
+ * The lowest docked height where the demo's five planned tasks unfold too, three rows and a rule
+ * each (90 before the margin above each group's first line: three groups, three rows more).
+ */
+const VARIANT_A_ROWS = 93
 
 /** A subagent spawned by the model, then one model request of its loop. */
 const launch = async ($: Engine, description: string) => {
@@ -1428,3 +1431,58 @@ test('where the unfolded planned rows do not fit, the agents keep their avatars 
   expect(await pane.find({ text: /^◷ / })).toBeDefined()
   expect(await pane.find({ text: TOTALS })).toBeDefined()
 })
+
+/** The margin above each line of the agents section, in the order drawn (`agents:row:*`, `agents:todo:*`). */
+const marginsOf = (tree: unknown) => {
+  const margins: [string, number][] = []
+  const walk = (node: unknown) => {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return
+    const key = String(one.props?.key ?? '')
+    if (key.startsWith('agents:row:') || key.startsWith('agents:todo:')) margins.push([key, Number(one.props?.marginTop ?? 0)])
+    for (const child of one.children ?? []) walk(child)
+  }
+  walk(tree)
+
+  return margins
+}
+
+test('the first unfolded line of each group has an empty row above it, the next ones the rule alone', async ($, on) => {
+  // Variant a: the demo's running agent, two finished and five planned, all unfolded.
+  const open = marginsOf(await (await demoDock($, on, 100, 120)).drawn())
+
+  expect(open).toHaveLength(8)
+  expect(open.map(([, margin]) => margin)).toEqual([1, 1, 0, 1, 0, 0, 0, 0])
+})
+
+test('variant b: only the groups whose first line is unfolded take the margin', async ($, on) => {
+  const margins = marginsOf(await (await demoDock($, on, 100, VARIANT_B_ROWS)).drawn())
+
+  expect(margins.filter(([key]) => key.startsWith('agents:row:')).map(([, margin]) => margin)).toEqual([1, 1, 0])
+  expect(margins.filter(([key]) => key.startsWith('agents:todo:'))).toHaveLength(5)
+  expect(margins.filter(([key]) => key.startsWith('agents:todo:')).every(([, margin]) => margin === 0)).toBe(true)
+})
+
+test('folded, a line takes one row and no margin', async ($, on) => {
+  const pane = await demoDock($, on, 100, 120)
+  await pane.press({ key: 'agents:fold' })
+  const margins = marginsOf(await pane.drawn())
+
+  expect(margins).toHaveLength(8)
+  expect(margins.every(([, margin]) => margin === 0)).toBe(true)
+})
+
+// The fit counts the margin: each variant starts exactly one row per group later than without it.
+for (const [rows, demoAvatars, plannedAvatars] of [
+  [VARIANT_A_ROWS - 1, true, false],
+  [VARIANT_A_ROWS, true, true],
+  [77, false, false],
+  [78, true, false],
+] as const) {
+  test(`at ${rows} rows the demo draws agent avatars: ${demoAvatars}, planned avatars: ${plannedAvatars}`, async ($, on) => {
+    const keys = rasterKeys(await (await demoDock($, on, 100, rows)).drawn())
+
+    expect(keys.some(key => key.startsWith('agent:ava:demo-'))).toBe(demoAvatars)
+    expect(keys.some(key => key.startsWith('agent:ava:todo-'))).toBe(plannedAvatars)
+  })
+}

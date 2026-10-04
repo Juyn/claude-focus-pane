@@ -4709,7 +4709,8 @@ export const register: Register = on => {
     const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
     // What the section takes in rows, for `kept` of its lines: its agents and its planned
     // tasks unfolded or not; the totals ride in the title row, they take none. An unfolded line
-    // takes a rule under it, unless it is the last one shown: an agent's four rows (its avatar
+    // takes a rule under it, unless it is the last one shown, and the first unfolded one of a group
+    // an empty row above it, under the group's title: an agent's four rows (its avatar
     // beside the title, meta and stats, the bar beneath them), a planned task its avatar's.
     type Fold = { agents: boolean; planned: boolean }
     const agentsRows = ({ agents: isAgentsFolded, planned: isPlannedFolded }: Fold, kept: number) => {
@@ -4724,7 +4725,13 @@ export const register: Register = on => {
         return sum + (one.kind === 'agent' ? 4 : isAvatar ? AVATAR_ROWS : 2) + (at < shown.length - 1 ? 1 : 0)
       }, 0)
 
-      return 3 + (isEmpty ? 1 : 0) + titles + body + (kept < lines.length ? 1 : 0)
+      // The first unfolded line of each group drawn has an empty row above it, under its title.
+      const margins =
+        (isAgentsFolded ? 0 : (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
+          (shown.some(one => one.kind === 'agent' && one.row.status !== 'running') ? 1 : 0)) +
+        (isPlannedFolded || !shown.some(one => one.kind === 'todo') ? 0 : 1)
+
+      return 3 + (isEmpty ? 1 : 0) + titles + margins + body + (kept < lines.length ? 1 : 0)
     }
     // What it must have before anything else gives way: every agent on one line each; with no
     // agent, the empty state or a first planned task.
@@ -4843,7 +4850,7 @@ export const register: Register = on => {
       return open.length > 0 ? `après ${open.join(', ')}` : 'prête'
     }
 
-    const agentLine = (row: AgentRow) => {
+    const agentLine = (row: AgentRow, isFirst: boolean) => {
       const tier = tierOf(row.effort)
       const room = windowOf(row.model ?? '')
       const used = Math.min(1, row.context / room)
@@ -4872,7 +4879,7 @@ export const register: Register = on => {
       }
 
       return (
-        <Box key={`agents:row:${row.id}`} flexDirection="row" width="100%" columnGap={1}>
+        <Box key={`agents:row:${row.id}`} flexDirection="row" width="100%" columnGap={1} marginTop={isFirst ? 1 : undefined}>
           {isAvatar && avatar(`agent:ava:${row.id}`, tier, false)}
           <Box flexDirection="column" flexGrow={1} flexShrink={1}>
             <Box flexDirection="row" width="100%" justifyContent="space-between">
@@ -4896,7 +4903,7 @@ export const register: Register = on => {
       )
     }
 
-    const plannedLine = (todo: Todo, rank: string) => {
+    const plannedLine = (todo: Todo, rank: string, isFirst: boolean) => {
       const waits = waitsOn(todo)
 
       if (isPlannedFolded) {
@@ -4911,7 +4918,7 @@ export const register: Register = on => {
       }
 
       return (
-        <Box key={`agents:todo:${rank}`} flexDirection="row" width="100%" columnGap={1}>
+        <Box key={`agents:todo:${rank}`} flexDirection="row" width="100%" columnGap={1} marginTop={isFirst ? 1 : undefined}>
           {isAvatar && avatar(`agent:ava:todo-${rank}`, null, true)}
           <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="center">
             <Box flexDirection="row" width="100%" justifyContent="space-between">
@@ -4936,7 +4943,7 @@ export const register: Register = on => {
     // A line, and the rule under it unless it is the last one shown.
     const lineNodes = (group: Line[], from: number) =>
       group.flatMap((one, at) => [
-        one.kind === 'agent' ? agentLine(one.row) : plannedLine(one.todo, one.rank),
+        one.kind === 'agent' ? agentLine(one.row, at === 0) : plannedLine(one.todo, one.rank, at === 0),
         ...((one.kind === 'agent' ? !isAgentsFolded : !isPlannedFolded) && from + at < shown.length - 1 ? [rule] : []),
       ])
     const doneTitle = doneL.length > 0 && (
