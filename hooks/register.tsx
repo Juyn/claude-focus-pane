@@ -4707,36 +4707,37 @@ export const register: Register = on => {
     const hasCards = crew.length > 0
 
     const isAvatar = e.surface !== 'mobile' && (Raster !== undefined || Svg !== undefined)
-    // What the section takes in rows, for `kept` of its lines: its agents and its planned
-    // tasks unfolded or not; the totals ride in the title row, they take none. An unfolded line
-    // takes a rule under it, unless it is the last one shown, and the first unfolded one of a group
-    // an empty row above it, under the group's title: an agent's four rows (its avatar
+    // What the section takes in rows, for `kept` of its lines, the first `open` of them unfolded
+    // and the others one row each; the totals ride in the title row, they take none. An unfolded
+    // line takes a rule under it, unless it is the last one shown, and the first unfolded line of
+    // a group an empty row above it, under the group's title: an agent's four rows (its avatar
     // beside the title, meta and stats, the bar beneath them), a planned task its avatar's.
-    type Fold = { agents: boolean; planned: boolean }
-    const agentsRows = ({ agents: isAgentsFolded, planned: isPlannedFolded }: Fold, kept: number) => {
+    const agentsRows = (open: number, kept: number) => {
       const shown = lines.slice(0, kept)
       const titles =
         (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
         (doneL.length > 0 ? 1 : 0) +
         (shown.some(one => one.kind === 'todo') ? 1 : 0)
-      const body = shown.reduce((sum, one, at) => {
-        if (one.kind === 'agent' ? isAgentsFolded : isPlannedFolded) return sum + 1
+      const groupOf = (one: Line) => (one.kind === 'todo' ? 'planned' : one.row.status === 'running' ? 'running' : 'done')
+      let body = 0
+      let margins = 0
+      shown.forEach((one, at) => {
+        if (at >= open) {
+          body += 1
 
-        return sum + (one.kind === 'agent' ? 4 : isAvatar ? AVATAR_ROWS : 2) + (at < shown.length - 1 ? 1 : 0)
-      }, 0)
-
-      // The first unfolded line of each group drawn has an empty row above it, under its title.
-      const margins =
-        (isAgentsFolded ? 0 : (shown.some(one => one.kind === 'agent' && one.row.status === 'running') ? 1 : 0) +
-          (shown.some(one => one.kind === 'agent' && one.row.status !== 'running') ? 1 : 0)) +
-        (isPlannedFolded || !shown.some(one => one.kind === 'todo') ? 0 : 1)
+          return
+        }
+        body += (one.kind === 'agent' ? 4 : isAvatar ? AVATAR_ROWS : 2) + (at < shown.length - 1 ? 1 : 0)
+        // The first unfolded line of each group drawn has an empty row above it, under its title.
+        if (at === 0 || groupOf(shown[at - 1]!) !== groupOf(one)) margins += 1
+      })
 
       return 3 + (isEmpty ? 1 : 0) + titles + margins + body + (kept < lines.length ? 1 : 0)
     }
     // What it must have before anything else gives way: every agent on one line each; with no
     // agent, the empty state or a first planned task.
     const agentsNeed = agentsRows(
-      { agents: true, planned: true },
+      0,
       hasCards ? runningL.length + (view.isDoneHidden ? 0 : doneL.length) : Math.min(1, lines.length),
     )
 
@@ -4799,23 +4800,17 @@ export const register: Register = on => {
 
 
     // ------------------------------------------------------------- the agents
-    // With the rows left, the richest that fits: (a) all unfolded, (b) the agents unfolded and
-    // the planned folded, (c) all folded, (d) c cut to its first lines, the running ones kept
-    // longest. The person's fold takes c and d alone.
+    // With the rows left, as many lines unfolded as fit, from the first in display order (the
+    // running ones, the latest finished, the planned) and the others one row each. When even all
+    // folded do not fit, the first lines alone are kept, the running ones longest. The person's
+    // fold takes none unfolded.
     const budget = tall - rowsOf(outlines, todosKept)
-    const variants: Fold[] = [
-      { agents: false, planned: false },
-      { agents: false, planned: true },
-      { agents: true, planned: true },
-    ].slice(view.isFolded ? 2 : 0)
-    const picked = variants.find(fold => agentsRows(fold, lines.length) <= budget)
-    const isAgentsFolded = picked === undefined ? true : picked.agents
-    const isPlannedFolded = picked === undefined ? true : picked.planned
+    let open = view.isFolded ? 0 : lines.length
+    while (open > 0 && agentsRows(open, lines.length) > budget) open -= 1
     let kept = lines.length
-    // Past the floors the pane overflows and scrolls: a running agent is never cut for room.
-    if (picked === undefined) {
-      const floor: Fold = { agents: true, planned: true }
-      while (kept > runningL.length && agentsRows(floor, kept) > budget) kept -= 1
+    // Past the floor the pane overflows and scrolls: a running agent is never cut for room.
+    if (open === 0) {
+      while (kept > runningL.length && agentsRows(0, kept) > budget) kept -= 1
     }
     const shown = lines.slice(0, kept)
 
@@ -4850,7 +4845,7 @@ export const register: Register = on => {
       return open.length > 0 ? `après ${open.join(', ')}` : 'prête'
     }
 
-    const agentLine = (row: AgentRow, isFirst: boolean) => {
+    const agentLine = (row: AgentRow, isFirst: boolean, isFolded: boolean) => {
       const tier = tierOf(row.effort)
       const room = windowOf(row.model ?? '')
       const used = Math.min(1, row.context / room)
@@ -4859,7 +4854,7 @@ export const register: Register = on => {
       const icon = iconOf(row)
       const name = row.model === null ? row.type : modelName(row.model)
 
-      if (isAgentsFolded) {
+      if (isFolded) {
         const right = `${tier === null ? '' : ' · '}${pct}% · ${clock(ms)}`
 
         return (
@@ -4903,10 +4898,10 @@ export const register: Register = on => {
       )
     }
 
-    const plannedLine = (todo: Todo, rank: string, isFirst: boolean) => {
+    const plannedLine = (todo: Todo, rank: string, isFirst: boolean, isFolded: boolean) => {
       const waits = waitsOn(todo)
 
-      if (isPlannedFolded) {
+      if (isFolded) {
         return (
           <Box key={`agents:todo:${rank}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
             <Text {...quiet(tone, tone.card)} wrap="truncate-end">
@@ -4940,12 +4935,17 @@ export const register: Register = on => {
     const shownRunning = shown.filter(one => one.kind === 'agent' && one.row.status === 'running')
     const shownDone = shown.filter(one => one.kind === 'agent' && one.row.status !== 'running')
     const shownPlanned = shown.filter(one => one.kind === 'todo')
-    // A line, and the rule under it unless it is the last one shown.
+    // A line, and the rule under it when it is unfolded, unless it is the last one shown. A line
+    // is unfolded when its place in the display order is among the first `open`.
     const lineNodes = (group: Line[], from: number) =>
-      group.flatMap((one, at) => [
-        one.kind === 'agent' ? agentLine(one.row, at === 0) : plannedLine(one.todo, one.rank, at === 0),
-        ...((one.kind === 'agent' ? !isAgentsFolded : !isPlannedFolded) && from + at < shown.length - 1 ? [rule] : []),
-      ])
+      group.flatMap((one, at) => {
+        const isFolded = from + at >= open
+
+        return [
+          one.kind === 'agent' ? agentLine(one.row, at === 0, isFolded) : plannedLine(one.todo, one.rank, at === 0, isFolded),
+          ...(!isFolded && from + at < shown.length - 1 ? [rule] : []),
+        ]
+      })
     const doneTitle = doneL.length > 0 && (
       <Box flexDirection="row" width="100%">
         <Button

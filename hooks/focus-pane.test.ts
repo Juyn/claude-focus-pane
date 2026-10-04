@@ -585,7 +585,7 @@ test('a ticket in a prompt binds its feature, whatever its case', async ($, on) 
 })
 
 const start = async ($: Engine, on: On) => {
-  engine(on)
+  const clock = engine(on)
   on('command.list', () => ({ value: [] }))
   on('command.register', ($$, e) => ({ value: { command: e.name } }))
   on('session.start', ($$, e) => ({ cwd: e.cwd }))
@@ -596,6 +596,8 @@ const start = async ($: Engine, on: On) => {
     value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
   await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
+
+  return clock
 }
 
 const petCommand = ($: Engine, style: string) =>
@@ -775,14 +777,15 @@ const tallPane = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', bodyR
 const OPUS = 'claude-opus-5-5'
 
 /**
- * A docked height where the agents unfold but the planned tasks fold: settled by the probe of
- * the fit (the demo: c below 78 rows, b from 78, a from 93, each group's first unfolded line taking an empty row).
+ * A docked height where exactly the demo's three agents unfold and the planned tasks fold: settled
+ * by the probe of the fit, which unfolds the lines one by one, greedily (the demo: all folded
+ * from 64 rows, a first line unfolded from 69, the third from 78, all eight from 93).
  */
-const VARIANT_B_ROWS = 85
+const VARIANT_B_ROWS = 78
 
 /**
  * The lowest docked height where the demo's five planned tasks unfold too, three rows and a rule
- * each (90 before the margin above each group's first line: three groups, three rows more).
+ * each: every line unfolded.
  */
 const VARIANT_A_ROWS = 93
 
@@ -1261,7 +1264,7 @@ test('a tall docked pane keeps the agents unfolded, with their avatars and the t
   expect(await pane.find({ text: TOTALS })).toBeDefined()
 })
 
-for (const [variant, rows] of [['c', 50], ['b', VARIANT_B_ROWS], ['a', 110]] as const) {
+for (const [variant, rows] of [['c', 66], ['b', VARIANT_B_ROWS], ['a', 110]] as const) {
   test(`variant ${variant}: the totals are the title's, no row is spent on them`, async ($, on) => {
     const pane = await demoDock($, on, 100, rows)
 
@@ -1472,17 +1475,110 @@ test('folded, a line takes one row and no margin', async ($, on) => {
   expect(margins.every(([, margin]) => margin === 0)).toBe(true)
 })
 
-// The fit counts the margin: each variant starts exactly one row per group later than without it.
-for (const [rows, demoAvatars, plannedAvatars] of [
-  [VARIANT_A_ROWS - 1, true, false],
-  [VARIANT_A_ROWS, true, true],
-  [77, false, false],
-  [78, true, false],
+// The fit unfolds line by line from the first in display order, and counts the margin: each
+// line count unfolded starts at the row where its rows, its rules and the margins fit.
+for (const [rows, unfolded] of [
+  [64, 0],
+  [68, 0],
+  [69, 1],
+  [73, 1],
+  [74, 2],
+  [77, 2],
+  [78, 3],
+  [81, 3],
+  [82, 4],
+  [VARIANT_A_ROWS - 1, 7],
+  [VARIANT_A_ROWS, 8],
 ] as const) {
-  test(`at ${rows} rows the demo draws agent avatars: ${demoAvatars}, planned avatars: ${plannedAvatars}`, async ($, on) => {
-    const keys = rasterKeys(await (await demoDock($, on, 100, rows)).drawn())
+  test(`at ${rows} rows the demo unfolds ${unfolded} of its eight lines, agents first`, async ($, on) => {
+    const drawn = await (await demoDock($, on, 100, rows)).drawn()
+    const keys = rasterKeys(drawn).filter(key => key.startsWith('agent:ava:'))
+    const agents = keys.filter(key => key.startsWith('agent:ava:demo-')).length
 
-    expect(keys.some(key => key.startsWith('agent:ava:demo-'))).toBe(demoAvatars)
-    expect(keys.some(key => key.startsWith('agent:ava:todo-'))).toBe(plannedAvatars)
+    expect(keys).toHaveLength(unfolded)
+    expect(agents).toBe(Math.min(unfolded, 3))
+    expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: rows } })
   })
 }
+
+// ---------------------------------------------------- the greedy unfolding
+
+/** A docked pane of `rows` rows, with no feature bound: only the session's own agents. */
+const bareDock = ($: Engine, rows: number) =>
+  $.ui.mount({
+    plugin: 'focus-pane',
+    surface: 'terminal',
+    component: 'Pane',
+    requestId: PANE,
+    props: { ...PROPS, bodyColumns: 100, placement: 'dock' as const, scroll: { offset: 0, bodyRows: rows } },
+  })
+
+/** `done` finished agents, oldest first, then `running` agents still going: ids in spawn order. */
+const crowd = async ($: Engine, clock: { advance: (ms: number) => Promise<void> }, done: number, running: number) => {
+  const ids: string[] = []
+  for (let at = 0; at < done + running; at += 1) {
+    const id = await launch($, `Agent ${at + 1}`)
+    await step($, id, SMALL)
+    await clock.advance(1000)
+    if (at < done) await finish($, id, 'answer')
+    ids.push(id)
+  }
+
+  return ids
+}
+
+/** Which of the ids have their avatar drawn, which are one folded row. */
+const unfoldedOf = (tree: unknown, ids: string[]) => {
+  const keys = rasterKeys(tree)
+
+  return ids.filter(id => keys.includes(`agent:ava:${id}`))
+}
+
+test('one running agent and six finished ones, a pane too short for all: the unfolding stops where the room does', async ($, on) => {
+  const clock = engine(on)
+  const ids = await crowd($, clock, 6, 1)
+  const running = ids[6]!
+  const pane = await bareDock($, 60)
+  const drawn = await pane.drawn()
+  const open = unfoldedOf(drawn, ids)
+
+  // The running agent first, then the finished ones from the most recent: a prefix of the display order.
+  const order = [running, ...ids.slice(0, 6).reverse()]
+  expect(open.length).toBeGreaterThan(0)
+  expect(open.length).toBeLessThan(order.length)
+  expect(order.slice(0, open.length).every(id => open.includes(id))).toBe(true)
+  expect(open).toContain(running)
+  expect(open).not.toContain(ids[0])
+  // The oldest are one folded row each, still listed.
+  expect(await pane.find({ key: `agents:row:${ids[0]}` })).toBeDefined()
+  expect(await pane.find({ text: /\+ \d+ autres/ })).toBeUndefined()
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 60 } })
+})
+
+test('seven finished agents, none running, in a docked pane of 57 rows: an avatar is still drawn', async ($, on) => {
+  const clock = engine(on)
+  const ids = await crowd($, clock, 7, 0)
+  const pane = await bareDock($, 57)
+  const drawn = await pane.drawn()
+  const open = unfoldedOf(drawn, ids)
+
+  expect(await pane.find({ text: /Terminés · 7/ })).toBeDefined()
+  expect(await pane.find({ text: /En cours/ })).toBeUndefined()
+  // The most recently finished first.
+  expect(open.length).toBeGreaterThan(0)
+  expect(open).toContain(ids[6])
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 57 } })
+})
+
+test('r folds every line, whatever room there is, and r again unfolds the greedy prefix', async ($, on) => {
+  const clock = engine(on)
+  const ids = await crowd($, clock, 3, 1)
+  const pane = await bareDock($, 140)
+
+  expect(unfoldedOf(await pane.drawn(), ids)).toHaveLength(4)
+  await pane.press({ key: 'agents:fold' })
+  expect(unfoldedOf(await pane.drawn(), ids)).toEqual([])
+  expect(await pane.find({ key: `agents:row:${ids[0]}` })).toBeDefined()
+  await pane.press({ key: 'agents:fold' })
+  expect(unfoldedOf(await pane.drawn(), ids)).toHaveLength(4)
+})
