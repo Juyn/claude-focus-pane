@@ -4951,7 +4951,6 @@ export const register: Register = on => {
         <Button
           key="agents:done"
           plain
-          hotkey="t"
           label={`${view.isDoneHidden ? '▸' : '▾'} Terminés · ${doneL.length}`}
           dimColor
           onPress={() => undefined}
@@ -5112,7 +5111,6 @@ export const register: Register = on => {
       ...(design ? ([['m', 'Miniatures'], ['o', 'Maquette']] as const) : []),
       ...(isBao ? ([['b', 'Bambou']] as const) : []),
       ...(isEmpty ? [] : ([['r', 'Replier']] as const)),
-      ...(doneL.length > 0 ? ([['t', 'Terminés']] as const) : []),
       ['ctrl+x tab', 'Clavier'],
       ['esc', 'Rendre la main'],
       ...(mine === null ? [] : ([[`/${mine}`, 'Rouvrir']] as const)),

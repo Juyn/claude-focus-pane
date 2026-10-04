@@ -1050,7 +1050,7 @@ test('r folds the rows to one line each, t hides the finished', async ($, on) =>
   await pane.press({ key: 'agents:fold' })
   expect(rasterKeys(await pane.drawn())).toContain('agent:ava:a1')
 
-  expect((await pane.find({ key: 'agents:done' }))?.props.hotkey).toBe('t')
+  expect((await pane.find({ key: 'agents:done' }))?.props.hotkey).toBeUndefined()
   await pane.press({ key: 'agents:done' })
   expect((await pane.find({ key: 'agents:done' }))?.props.label).toBe('▸ Terminés · 1')
   expect(rasterKeys(await pane.drawn())).not.toContain('agent:ava:a2')
@@ -1185,18 +1185,21 @@ test('the demo fills the agents: one running, two finished, planned tasks that w
   expect(await pane.find({ text: /ctx 18% · 177k ≈\$1\.65 03:21/ })).toBeDefined()
 })
 
-test('the legend names r, and t when there are finished agents', async ($, on) => {
+test('the legend names r alone, and the Terminés button has no hotkey even with finished agents', async ($, on) => {
   engine(on)
   const id = await launch($, 'Légende')
   await step($, id, SMALL)
   const before = await tallPane($)
   expect((await before.find({ key: 'legend' }))?.text).toMatch(/r Replier/)
-  expect((await before.find({ key: 'legend' }))?.text).not.toMatch(/t Terminés/)
   await before.unmount()
   await finish($, id, 'answer')
   const after = await tallPane($)
 
-  expect((await after.find({ key: 'legend' }))?.text).toMatch(/r Replier  t Terminés/)
+  expect((await after.find({ key: 'legend' }))?.text).toMatch(/r Replier/)
+  expect((await after.find({ key: 'legend' }))?.text).not.toMatch(/Terminés/)
+  const button = await after.find({ key: 'agents:done' })
+  expect(button?.props.hotkey).toBeUndefined()
+  expect(button?.props.label).toBe('▾ Terminés · 1')
 })
 
 test('the pane redraws each second while an agent runs, and stops once none does', async ($, on) => {
