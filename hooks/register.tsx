@@ -83,6 +83,8 @@ const OUTLINE_LEAST = 2
 
 /** The fewest todo rows kept when the pane is short, and the lines a brief may wrap to. */
 const TODOS_LEAST = 4
+/** The todo list at its leanest: the step in hand, and the row that counts the others. */
+const TODOS_ONE = 2
 const BRIEF_LINES = 2
 
 const SACRED_BOOK = 'https://github.com/unlocker-io/sacred-book/blob/main'
@@ -4663,16 +4665,19 @@ export const register: Register = on => {
       svgDrawn = svgKey()
     }
 
-    const rowsOf = (outlines: number, todosKept: number) => {
+    const rowsOf = (outlines: number, todosKept: number, isCompact = false) => {
       const paperRows = (one: Doc) =>
         Math.min(one.outline.length, outlines) + (one.outline.length > outlines ? 1 : 0) + 4
       const book =
         bound === null
           ? 0
           : (design ? 4 : 3) +
-            (paperWidth === room
-              ? papers.reduce((sum, one) => sum + paperRows(one), 0)
-              : Math.max(0, ...papers.map(paperRows)))
+            // Compact: the papers shrink to one row of their statuses, and their links go.
+            (isCompact
+              ? papers.length > 0 ? 1 : 0
+              : paperWidth === room
+                ? papers.reduce((sum, one) => sum + paperRows(one), 0)
+                : Math.max(0, ...papers.map(paperRows)))
       const list = plan.length === 0 ? 0 : 3 + Math.min(plan.length, todosKept)
 
       return (
@@ -4734,24 +4739,74 @@ export const register: Register = on => {
 
       return 3 + (isEmpty ? 1 : 0) + titles + margins + body + (kept < lines.length ? 1 : 0)
     }
-    // What it must have before anything else gives way: every agent on one line each; with no
-    // agent, the empty state or a first planned task.
-    const agentsNeed = agentsRows(
-      0,
-      hasCards ? runningL.length + (view.isDoneHidden ? 0 : doneL.length) : Math.min(1, lines.length),
-    )
+    // ---- Who gives way first. The Sacred Book and the todos fold before the agents do:
+    // 0. start at the floors (outlines and todos), every line folded;
+    // 1. with agents, the first lines (the running ones, else the latest finished) must unfold:
+    //    the outlines go down to none, the todos to the step in hand, the book to compact, one
+    //    notch at a time, until they fit; past the last notch the count of unfolded lines goes down;
+    // 2. then greedily, one unit at a time, and the first unit that does not fit ends it: the other
+    //    agents unfold, the outlines and the todos come back (only if step 1 cost nothing), then
+    //    the planned tasks unfold.
+    type Fit = { outlines: number; todos: number; isCompact: boolean }
+    const floor: Fit = { outlines: OUTLINE_LEAST, todos: TODOS_LEAST, isCompact: false }
+    const notches: Fit[] = [floor]
+    const notch = (next: Fit) => {
+      const was = notches[notches.length - 1]!
+      // A notch that frees no row is no notch at all.
+      if (rowsOf(next.outlines, next.todos, next.isCompact) < rowsOf(was.outlines, was.todos, was.isCompact)) notches.push(next)
+    }
+    for (let at = OUTLINE_LEAST - 1; at >= 0; at -= 1) notch({ ...notches[notches.length - 1]!, outlines: at })
+    for (let at = TODOS_LEAST - 1; at >= TODOS_ONE; at -= 1) notch({ ...notches[notches.length - 1]!, todos: at })
+    notch({ ...notches[notches.length - 1]!, isCompact: true })
 
-    let outlines = OUTLINE_SHOWN
-    let todosKept = plan.length
-    // The agents come first: the outlines, then the todos, give way before they lose a line.
-    const isOver = () => rowsOf(outlines, todosKept) + agentsNeed > tall
-    while (isOver() && outlines > OUTLINE_LEAST) outlines -= 1
-    while (isOver() && todosKept > TODOS_LEAST) todosKept -= 1
+    const agentCount = lines.filter(one => one.kind === 'agent').length
+    const unfoldable = view.isFolded ? 0 : lines.length
+    const fits = (at: Fit, unfolded: number) =>
+      rowsOf(at.outlines, at.todos, at.isCompact) + agentsRows(unfolded, lines.length) <= tall
+    let fit = floor
+    let open = 0
+    let isDegraded = false
+    if (agentCount > 0) {
+      let want = view.isFolded ? 0 : runningL.length > 0 ? runningL.length : 1
+      const first = notches.findIndex(at => fits(at, want))
+      if (first >= 0) {
+        fit = notches[first]!
+        isDegraded = first > 0
+      } else {
+        fit = notches[notches.length - 1]!
+        isDegraded = notches.length > 1
+        while (want > 0 && !fits(fit, want)) want -= 1
+      }
+      open = want
+    }
+    let isStopped = false
+    // 2a: the other agents.
+    while (!isStopped && open < Math.min(agentCount, unfoldable)) {
+      if (fits(fit, open + 1)) open += 1
+      else isStopped = true
+    }
+    // 2b: the outlines, then the todos, back up.
+    while (!isStopped && !isDegraded && fit.outlines < OUTLINE_SHOWN) {
+      if (fits({ ...fit, outlines: fit.outlines + 1 }, open)) fit = { ...fit, outlines: fit.outlines + 1 }
+      else isStopped = true
+    }
+    while (!isStopped && !isDegraded && fit.todos < plan.length) {
+      if (fits({ ...fit, todos: fit.todos + 1 }, open)) fit = { ...fit, todos: fit.todos + 1 }
+      else isStopped = true
+    }
+    // 2c: the planned tasks.
+    while (!isStopped && open < unfoldable) {
+      if (fits(fit, open + 1)) open += 1
+      else isStopped = true
+    }
+    const { outlines, isCompact } = fit
+    const todosKept = Math.max(fit.todos, 0)
 
     // The todo list's window, when it had to give rows: it follows the step in hand.
     const doing = Math.max(0, plan.findIndex(one => one.status === 'in_progress'))
     const isCut = todosKept < plan.length
-    const todosFrom = isCut ? Math.max(0, Math.min(doing - 1, plan.length - (todosKept - 1))) : 0
+    // One step shown: the one in hand; more, the step before it too.
+    const todosFrom = isCut ? Math.max(0, Math.min(doing - (todosKept > TODOS_ONE ? 1 : 0), plan.length - (todosKept - 1))) : 0
     const todosSeen = isCut ? plan.slice(todosFrom, todosFrom + todosKept - 1) : plan
 
     // --------------------------------------------------------------- the plan
@@ -4804,9 +4859,7 @@ export const register: Register = on => {
     // running ones, the latest finished, the planned) and the others one row each. When even all
     // folded do not fit, the first lines alone are kept, the running ones longest. The person's
     // fold takes none unfolded.
-    const budget = tall - rowsOf(outlines, todosKept)
-    let open = view.isFolded ? 0 : lines.length
-    while (open > 0 && agentsRows(open, lines.length) > budget) open -= 1
+    const budget = tall - rowsOf(outlines, todosKept, isCompact)
     let kept = lines.length
     // Past the floor the pane overflows and scrolls: a running agent is never cut for room.
     if (open === 0) {
@@ -5098,10 +5151,22 @@ export const register: Register = on => {
               </Box>
             </Box>
           )}
+          {isCompact && papers.length > 0 && (
+            <Box key="book:statuses" flexDirection="row" width="100%" columnGap={3}>
+              {papers.map(one => (
+                <Box key={`book:status:${one.kind}`} flexDirection="row" columnGap={1}>
+                  <Text {...quiet(tone, tone.card)}>{one.kind === 'spec' ? 'SPEC ›' : 'PLAN ›'}</Text>
+                  {status(one.status)}
+                </Box>
+              ))}
+            </Box>
+          )}
         </Box>
-        <Box flexDirection={paperWidth === room ? 'column' : 'row'} width="100%" columnGap={1}>
-          {papers.map(paper)}
-        </Box>
+        {!isCompact && (
+          <Box flexDirection={paperWidth === room ? 'column' : 'row'} width="100%" columnGap={1}>
+            {papers.map(paper)}
+          </Box>
+        )}
       </Box>
     )
 

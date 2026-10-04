@@ -777,11 +777,12 @@ const tallPane = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal', bodyR
 const OPUS = 'claude-opus-5-5'
 
 /**
- * A docked height where exactly the demo's three agents unfold and the planned tasks fold: settled
- * by the probe of the fit, which unfolds the lines one by one, greedily (the demo: all folded
- * from 64 rows, a first line unfolded from 69, the third from 78, all eight from 93).
+ * The lowest docked height where exactly the demo's three agents unfold and the planned tasks
+ * fold: settled by the probe of the fit (the demo: the running agent unfolded from 53 rows, the
+ * second from 66, the third from 70, all eight lines from 93). Above 52 the Sacred Book and the
+ * todos have given way for them: that is the order, they fold before the agents do.
  */
-const VARIANT_B_ROWS = 78
+const VARIANT_B_ROWS = 70
 
 /**
  * The lowest docked height where the demo's five planned tasks unfold too, three rows and a rule
@@ -1267,7 +1268,7 @@ test('a tall docked pane keeps the agents unfolded, with their avatars and the t
   expect(await pane.find({ text: TOTALS })).toBeDefined()
 })
 
-for (const [variant, rows] of [['c', 66], ['b', VARIANT_B_ROWS], ['a', 110]] as const) {
+for (const [variant, rows] of [['c', 50], ['b', VARIANT_B_ROWS], ['a', 110]] as const) {
   test(`variant ${variant}: the totals are the title's, no row is spent on them`, async ($, on) => {
     const pane = await demoDock($, on, 100, rows)
 
@@ -1479,17 +1480,21 @@ test('folded, a line takes one row and no margin', async ($, on) => {
 })
 
 // The fit unfolds line by line from the first in display order, and counts the margin: each
-// line count unfolded starts at the row where its rows, its rules and the margins fit.
+// line count unfolded starts at the row where its rows, its rules and the margins fit. The running
+// agent comes first, at the price of the outlines, the todos and the Sacred Book (from 53 rows);
+// the other agents come next, then the planned tasks, once the outlines and the todos are back.
 for (const [rows, unfolded] of [
-  [64, 0],
-  [68, 0],
-  [69, 1],
-  [73, 1],
-  [74, 2],
-  [77, 2],
-  [78, 3],
+  [50, 0],
+  [52, 0],
+  [53, 1],
+  [65, 1],
+  [66, 2],
+  [69, 2],
+  [VARIANT_B_ROWS, 3],
   [81, 3],
   [82, 4],
+  [84, 4],
+  [85, 5],
   [VARIANT_A_ROWS - 1, 7],
   [VARIANT_A_ROWS, 8],
 ] as const) {
@@ -1584,4 +1589,117 @@ test('r folds every line, whatever room there is, and r again unfolds the greedy
   expect(await pane.find({ key: `agents:row:${ids[0]}` })).toBeDefined()
   await pane.press({ key: 'agents:fold' })
   expect(unfoldedOf(await pane.drawn(), ids)).toHaveLength(4)
+})
+
+// ------------------------------------------- the Sacred Book and the todos fold first
+
+/** Every Text of a drawing, its children flattened. */
+const textsOf = (tree: unknown) => {
+  const texts: string[] = []
+  const flat = (node: unknown): string => {
+    const one = node as Drawn
+    if (typeof node === 'string') return node
+    if (!one || typeof one !== 'object') return ''
+
+    return (one.children ?? []).map(flat).join('')
+  }
+  const walk = (node: unknown) => {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return
+    if (one.type === 'Text') texts.push(flat(one))
+    for (const child of one.children ?? []) walk(child)
+  }
+  walk(tree)
+
+  return texts
+}
+/** The outline rows of the papers (`▸ heading`, `  · sub-heading`), the Terminés button apart. */
+const outlineRows = (tree: unknown) => textsOf(tree).filter(text => /^(▸ (?!Terminés)|  · )/.test(text))
+/** The todo steps drawn in the TODOS block. */
+const todoRows = (tree: unknown) => textsOf(seek(tree, node => node.props?.key === 'plan')).filter(text => /^ [✓●○] ./.test(text))
+
+test('at 57 rows the demo unfolds the running agent: the outlines and the todos give way, the book stays whole', async ($, on) => {
+  const drawn = await (await demoDock($, on, 100, 57)).drawn()
+  const avatars = rasterKeys(drawn).filter(key => key.startsWith('agent:ava:'))
+
+  // The running agent, alone: its line is unfolded, its avatar drawn.
+  expect(avatars).toEqual(['agent:ava:demo-1'])
+  // The outlines went down to none ("+ n sections" alone), the todos to the step in hand.
+  expect(outlineRows(drawn)).toEqual([])
+  expect(textsOf(drawn).filter(text => /\+ \d+ sections/.test(text))).toHaveLength(2)
+  expect(todoRows(drawn)).toHaveLength(1)
+  expect(todoRows(drawn)[0]).toMatch(/^ ● /)
+  expect(textsOf(drawn)).toContain('   + 7 autres étapes')
+  // The Sacred Book is still the whole one: its papers, no compact row.
+  expect(seek(drawn, node => node.props?.key === 'book:statuses')).toBeUndefined()
+  expect(seek(drawn, node => node.props?.key === 'doc:spec')).toBeDefined()
+  expect(seek(drawn, node => node.props?.key === 'doc:plan')).toBeDefined()
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 57 } })
+})
+
+test('where the running agent does not fit with the whole book, the Sacred Book turns compact', async ($, on) => {
+  const pane = await demoDock($, on, 100, 53)
+  const drawn = await pane.drawn()
+  const book = seek(drawn, node => node.props?.key === 'book')
+  const [frame, ...rest] = (book?.children ?? []) as Drawn[]
+
+  expect(rasterKeys(drawn).filter(key => key.startsWith('agent:ava:'))).toEqual(['agent:ava:demo-1'])
+  // One rounded box and nothing under it: no paper, no GitHub link, no outline.
+  expect(rest).toEqual([])
+  expect(frame?.props?.borderStyle).toBe('round')
+  expect(seek(drawn, node => node.props?.key === 'doc:spec')).toBeUndefined()
+  expect(seek(drawn, node => node.props?.key === 'doc:plan')).toBeUndefined()
+  expect(textsOf(drawn).some(text => /ouvrir sur GitHub/.test(text))).toBe(false)
+  expect(outlineRows(drawn)).toEqual([])
+  // Counted 2 (frame) + FEATURE + MAQUETTE + statuses = 5 rows, drawn as three rows in the frame.
+  expect(frame?.children).toHaveLength(3)
+  const statuses = seek(frame, node => node.props?.key === 'book:statuses')
+  expect(textsOf(statuses)).toEqual(['SPEC ›', ' APPROVED ', 'PLAN ›', ' IN PROGRESS '])
+  expect(textsOf(frame)).toContain(' FEATURE ')
+  expect(textsOf(frame)).toContain(' MAQUETTE ')
+  // The mockup keeps its two buttons.
+  expect(await pane.find({ key: 'gallery:open' })).toBeDefined()
+  expect(await pane.find({ key: 'design:open' })).toBeDefined()
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 53 } })
+})
+
+test('a bare pane with finished agents only unfolds the latest finished first, the todos giving way', async ($, on) => {
+  const clock = engine(on)
+  await $.tool.call({
+    tool: 'TodoWrite',
+    todos: Array.from({ length: 10 }, (_unused, at) => ({
+      content: `étape ${at + 1}`,
+      status: at < 3 ? 'completed' : at === 3 ? 'in_progress' : 'pending',
+      activeForm: `étape ${at + 1} en cours`,
+    })),
+  })
+  const ids = await crowd($, clock, 3, 0)
+  const drawn = await (await bareDock($, 48)).drawn()
+
+  expect(unfoldedOf(drawn, ids)).toEqual([ids[2]])
+  // The todo list is cut to the step in hand to make that room.
+  expect(todoRows(drawn)).toHaveLength(1)
+  expect(textsOf(drawn)).toContain('   + 9 autres étapes')
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 48 } })
+})
+
+test('where the other agents stop unfolding midway, the outlines stay at their floor', async ($, on) => {
+  // 69 rows: the running agent and one finished one unfold, the third does not fit; the outlines
+  // do not come back up with the rows that are left, they are the agents'.
+  const drawn = await (await demoDock($, on, 100, 69)).drawn()
+
+  expect(rasterKeys(drawn).filter(key => key.startsWith('agent:ava:'))).toHaveLength(2)
+  // OUTLINE_LEAST = 2 headings a paper, two papers side by side.
+  expect(outlineRows(drawn)).toHaveLength(4)
+  expect(textsOf(drawn)).toContain('   + 5 autres étapes')
+})
+
+test('with the agents unfolded, the outlines and the todos come back before the planned tasks unfold', async ($, on) => {
+  // 75 rows: all three agents, more outlines than the floor, more todos than the floor, no planned avatar.
+  const drawn = await (await demoDock($, on, 100, 75)).drawn()
+
+  expect(rasterKeys(drawn).filter(key => key.startsWith('agent:ava:demo-'))).toHaveLength(3)
+  expect(rasterKeys(drawn).filter(key => key.startsWith('agent:ava:todo-'))).toEqual([])
+  expect(outlineRows(drawn).length).toBeGreaterThan(4)
+  expect(todoRows(drawn)).toHaveLength(4)
 })
