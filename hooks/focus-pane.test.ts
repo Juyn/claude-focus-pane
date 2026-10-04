@@ -1703,3 +1703,28 @@ test('with the agents unfolded, the outlines and the todos come back before the 
   expect(outlineRows(drawn).length).toBeGreaterThan(4)
   expect(todoRows(drawn)).toHaveLength(4)
 })
+
+test('every running agent unfolds before the todos stop giving way; short of room, the latest started keep their avatar', async ($, on) => {
+  const clock = engine(on)
+  await $.tool.call({
+    tool: 'TodoWrite',
+    todos: Array.from({ length: 10 }, (_unused, at) => ({
+      content: `étape ${at + 1}`,
+      status: at < 3 ? 'completed' : at === 3 ? 'in_progress' : 'pending',
+      activeForm: `étape ${at + 1} en cours`,
+    })),
+  })
+  const ids = await crowd($, clock, 0, 3)
+
+  // 56 rows: the three running agents, at the price of the todos cut to the step in hand.
+  const wide56 = await bareDock($, 56)
+  const all = await wide56.drawn()
+  expect(unfoldedOf(all, ids)).toEqual(ids)
+  expect(todoRows(all)).toHaveLength(1)
+  await wide56.unmount()
+  // 52 rows: the most degraded state holds two of them only, the latest started.
+  const two = await (await bareDock($, 52)).drawn()
+  expect(unfoldedOf(two, ids)).toEqual([ids[1], ids[2]])
+  expect(todoRows(two)).toHaveLength(1)
+  expect(two).toMatchObject({ type: 'Box', props: { minHeight: 52 } })
+})
