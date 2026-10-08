@@ -63,11 +63,21 @@ machines.
 
 - Une étape de plus dans la boucle de `scripts/live-sync.sh` (service `focus-pane-sync`, déjà
   installé), à chaque tour, si `~/inbox` existe sur le PC :
-  `rsync -rl --ignore-existing --partial-dir=.rsync-partial --exclude='.*' --timeout=30 -e "ssh <options de la synchro>" ~/inbox/ <alias>:inbox/`.
-  Même connexion persistante (ControlPath), mêmes options (pas de transfert d'agent).
+  - **seuls partent les fichiers stables côté PC** : non modifiés depuis au moins 10 s (comparés à
+    un fichier de référence daté de 10 s plus tôt, `find … ! -newer` — `find` est `bfs` sur le PC),
+    non vides, non cachés, et jamais un téléchargement en cours (`*.part`, `*.crdownload`, `*.tmp`) ;
+  - leur liste est passée à `rsync -rl --from0 --files-from=- --ignore-existing --partial-dir=.rsync-partial --timeout=30 -e "ssh <options de la synchro>" ~/inbox/ <alias>:inbox/`,
+    même connexion persistante (ControlPath), mêmes options (pas de transfert d'agent) ;
+  - l'envoi tourne **en arrière-plan sous `flock`** : un gros fichier ne bloque jamais la boucle
+    (battements, instantanés), et deux envois ne se chevauchent pas ;
+  - une erreur de `rsync` est écrite dans le journal du service quand elle change (diagnostic par
+    `journalctl --user -u focus-pane-sync`).
+  Conséquences assumées : un fichier vide ne part jamais ; un fichier part au plus tôt 10 s après
+  sa dernière écriture.
 - **Pas de `-a` ni `-t`** : la date d'un fichier sur le VPS est son **heure d'arrivée** (un PDF
   vieux d'un an glissé maintenant est « arrivé maintenant »). `--ignore-existing` : un fichier déjà
-  présent sur le VPS n'est jamais renvoyé (pour renvoyer une version modifiée, la renommer).
+  présent sur le VPS n'est jamais renvoyé (pour renvoyer une version modifiée, la renommer) — d'où
+  l'exigence de stabilité côté PC : un fichier tronqué envoyé le resterait.
 - **Jamais de suppression** côté VPS (`--delete` interdit) : effacer sur le PC n'efface pas là-bas.
 - `rsync` écrit dans un fichier temporaire caché puis renomme : aucun fichier tronqué visible
   (et les noms `.…` sont ignorés par le mod).
