@@ -1386,6 +1386,15 @@ test('the main loop and its turn reach the heartbeat', async ($, on) => {
   expect(beats().at(-1)?.main).toEqual({ model: OPUS, effort: 'high', isRunning: true })
 })
 
+test('the end of a main turn reaches the heartbeat: it no longer runs', async ($, on) => {
+  await start($, on)
+  await $.turn.start({ text: 'go', turnId: 'main' })
+  expect(beats().at(-1)?.main.isRunning).toBe(true)
+  await $.turn.complete({ turnId: 'main', answer: '', durationMs: 1000, isAborted: false, reason: 'answer' })
+
+  expect(beats().at(-1)?.main.isRunning).toBe(false)
+})
+
 test('with no HOME nothing is written, and a subagent still starts', async ($, on) => {
   await start($, on)
   home = undefined
@@ -2047,6 +2056,16 @@ test('the 3 s refresh skips the read while the Sessions tab is behind another ta
   await clock.advance(3_000)
 
   expect(reads()).toBe(before)
+})
+
+test('a Sessions tab drawn after a reload, with no /mission sessions, starts the 3 s refresh', async ($, on) => {
+  const clock = await start($, on)
+  const reads = () => runs.filter(argv => argv.some(one => one.endsWith('/scripts/live_snapshot.py'))).length
+  await sessionsPane($)
+  const before = reads()
+  await clock.advance(3_000)
+
+  expect(reads()).toBe(before + 1)
 })
 
 test('the Focus pane offers s for the Sessions tab', async ($, on) => {
