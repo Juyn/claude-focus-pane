@@ -632,12 +632,15 @@ let isCopyRefused = false
 const inboxWrites: unknown[] = []
 /** For each write of the inboxView atom that holds a taken file: how many inbox-taken.json writes came before it. */
 const takenAtomSeenAfterFileWrites: number[] = []
+/** What $.command.list answers, and every name $.command.register was asked for. */
+let listedCommands: { name: string; description: string; source: 'builtin' | 'plugin' | 'user' | 'mcp'; plugin?: string }[] = []
+const registered: string[] = []
 /** What $.prompt.read answers: the draft and the cursor; null makes the read fail. */
 let promptBox: { text: string; cursor: number } | null = null
 /** The toasts the plugin showed. */
 const toasts: string[] = []
 
-const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = () => FAILED) => {
+const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = () => FAILED, commands: typeof listedCommands = []) => {
   const clock = engine(on)
   runs.length = 0
   opened.length = 0
@@ -646,6 +649,8 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
   inboxWrites.length = 0
   takenAtomSeenAfterFileWrites.length = 0
   promptBox = null
+  listedCommands = commands
+  registered.length = 0
   fills.length = 0
   copies.length = 0
   toasts.length = 0
@@ -686,8 +691,13 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
       ...(dropsPaneIs === 'gone' ? [] : [{ id: 'drops', title: 'Drops', isShown: true, isFocused: false, isPlaced: true }]),
     ],
   }))
-  on('command.list', () => ({ value: [] }))
-  on('command.register', ($$, e) => ({ value: { command: e.name } }))
+  on('command.run', () => ({ text: 'the engine beneath' }))
+  on('command.list', () => ({ value: listedCommands }))
+  on('command.register', ($$, e) => {
+    registered.push(e.name)
+
+    return { value: { command: e.name } }
+  })
   on('session.start', ($$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
   on('store.set', () => ({ value: undefined }))
@@ -2267,6 +2277,32 @@ test('taking a file: the atom hears of it before the file is written, and anothe
   expect(takenAtomSeenAfterFileWrites[0]).toBe(0)
   const final = JSON.parse(written.filter(one => one.path === TAKEN).at(-1)?.text ?? '{}')
   expect(Object.keys(final).sort()).toEqual(['autre.pdf', 'rapport.pdf'])
+})
+
+test('/inbox is registered when no command holds the name', async ($, on) => {
+  await start($, on)
+  expect(registered).toContain('inbox')
+})
+
+test('/inbox leaves a name held by another plugin alone; /mission drops still opens the tab', async ($, on) => {
+  await start($, on, undefined, [{ name: 'inbox', description: 'Their inbox', source: 'plugin', plugin: 'mailer' }])
+  expect(registered).not.toContain('inbox')
+
+  const ran = await $.command.run({ command: 'inbox', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  expect(opened).not.toContain('drops')
+  expect(ran.text).toBe('the engine beneath')
+
+  await $.command.run({ command: 'mission', args: 'drops', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  expect(opened).toContain('drops')
+})
+
+test('/inbox is registered again on a reload when the listed one is this plugin\'s own', async ($, on) => {
+  await start($, on)
+  listedCommands = [{ name: 'inbox', description: 'Drops', source: 'plugin', plugin: 'focus-pane' }]
+  registered.length = 0
+  await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
+
+  expect(registered).toContain('inbox')
 })
 
 test('a file another session took leaves the band', async ($, on) => {

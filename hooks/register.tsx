@@ -4239,10 +4239,15 @@ export const register: Register = on => {
       void readInbox($).catch(() => undefined)
     })
     // /inbox opens the Drops tab; a name taken by another plugin leaves it to /mission drops.
-    inboxCommand = await $.command
-      .register({ name: 'inbox', description: "L'onglet Drops : les fichiers reçus dans ~/inbox, à insérer ou copier" })
-      .then(() => 'inbox')
-      .catch(() => null)
+    // A listed `inbox` that is not ours is never shadowed (ours, on a reload, is registered again).
+    const holder = (await $.command.list().catch(() => [])).find(one => one.name === 'inbox')
+    inboxCommand =
+      holder !== undefined && holder.plugin !== 'focus-pane'
+        ? null
+        : await $.command
+            .register({ name: 'inbox', description: "L'onglet Drops : les fichiers reçus dans ~/inbox, à insérer ou copier" })
+            .then(() => 'inbox')
+            .catch(() => null)
 
     const branch = await $.process
       .run(['git', 'branch', '--show-current'], { cwd: await $.session.cwd() })
