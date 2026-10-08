@@ -54,6 +54,19 @@ test('a malformed session is dropped, a missing label falls back to the host', (
   expect(read?.sessions.map(one => one.sessionId)).toEqual(['ok'])
 })
 
+test('control characters in a name, a folder or a title are stripped, and an agent without a model is dropped', () => {
+  const agent = { id: 'a', title: 'x\u001by', model: 'claude-sonnet-5-5', effort: null, startedAt: NOW }
+  const text = JSON.stringify({
+    v: 1, host: 'h', takenAt: NOW,
+    sessions: [live({ sessionId: 'c', name: 'a\u001b[31mb\nc', cwd: '/h/\u0007p', agents: [agent, { id: 'b', title: 't', startedAt: NOW }] as never })],
+  })
+  const [read] = parseSnapshot(text)?.sessions ?? []
+
+  expect(read?.name).toBe('a [31mb c')
+  expect(read?.cwd).toBe('/h/ p')
+  expect(read?.agents.map(one => one.title)).toEqual(['x y'])
+})
+
 test('blocks: this machine first, the others by label; the waiting before the working, newest first', () => {
   const own = snap({ host: 'Rocinante', label: 'PC', sessions: [
     live({ sessionId: 'old', statusUpdatedAt: NOW - 90_000 }),

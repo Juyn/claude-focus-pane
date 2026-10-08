@@ -40,8 +40,18 @@ const ORIGINS: ReadonlySet<string> = new Set(['desktop', 'cli', 'worker'])
 const isBeatAgent = (one: unknown): one is BeatAgent => {
   const agent = one as Partial<BeatAgent> | null
 
-  return !!agent && typeof agent.id === 'string' && typeof agent.title === 'string' && typeof agent.startedAt === 'number'
+  return (
+    !!agent &&
+    typeof agent.id === 'string' &&
+    typeof agent.title === 'string' &&
+    typeof agent.startedAt === 'number' &&
+    (typeof agent.model === 'string' || agent.model === null) &&
+    (typeof agent.effort === 'string' || typeof agent.effort === 'number' || agent.effort === null)
+  )
 }
+
+/** A line of text with its control characters turned into spaces: the engine refuses a tree holding them. */
+const plain = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
 
 const isLiveSession = (one: unknown): one is LiveSession => {
   const session = one as Partial<LiveSession> | null
@@ -76,7 +86,12 @@ export const parseSnapshot = (text: string): Snapshot | null => {
     host: taken.host,
     label: typeof taken.label === 'string' && taken.label !== '' ? taken.label : taken.host,
     takenAt: taken.takenAt,
-    sessions: taken.sessions.filter(isLiveSession).map(one => ({ ...one, agents: one.agents.filter(isBeatAgent) })),
+    sessions: taken.sessions.filter(isLiveSession).map(one => ({
+      ...one,
+      name: plain(one.name),
+      cwd: plain(one.cwd),
+      agents: one.agents.filter(isBeatAgent).map(agent => ({ ...agent, title: plain(agent.title) })),
+    })),
   }
 }
 
