@@ -3264,7 +3264,9 @@ const readInbox = async ($: EngineInterface) => {
   const isSame =
     was.dir === dir && JSON.stringify(was.drops) === JSON.stringify(drops) && JSON.stringify(was.taken) === JSON.stringify(taken) && offer === lastOffer
   lastOffer = offer
-  if (isSame) return
+  // The Drops tab shown draws ages: the engine reuses an answer until a state it read is written, so write each tick.
+  const isDropsShown = (await $.ui.panes().catch(() => [])).some(one => one.id === DROPS && one.isShown)
+  if (isSame && !isDropsShown) return
   await update($, inboxView, old => ({ ...old, dir, drops, taken, readAt: now }))
 }
 

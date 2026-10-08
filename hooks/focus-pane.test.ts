@@ -619,6 +619,8 @@ const runs: string[][] = []
 const opened: string[] = []
 /** What $.ui.panes answers about the Sessions tab: shown, behind another tab, or gone. */
 let sessionsPaneIs: 'shown' | 'behind' | 'gone' = 'shown'
+/** What $.ui.panes answers about the Drops tab: shown, or gone. */
+let dropsPaneIs: 'shown' | 'gone' = 'gone'
 
 /** What $.prompt.fill was asked to insert, and whether it answers filled. */
 const fills: string[] = []
@@ -626,6 +628,8 @@ let isFillRefused = false
 /** What $.ui.copy was asked to copy, and whether it answers copied. */
 const copies: string[] = []
 let isCopyRefused = false
+/** The values written to the inboxView atom, in order. */
+const inboxWrites: unknown[] = []
 /** The toasts the plugin showed. */
 const toasts: string[] = []
 
@@ -634,11 +638,18 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
   runs.length = 0
   opened.length = 0
   sessionsPaneIs = 'shown'
+  dropsPaneIs = 'gone'
+  inboxWrites.length = 0
   fills.length = 0
   copies.length = 0
   toasts.length = 0
   isFillRefused = false
   isCopyRefused = false
+  on('state.set', ($$, e, then) => {
+    if (e.key === 'inboxView') inboxWrites.push(e.value)
+
+    return then(e)
+  })
   on('prompt.fill', ($$, e) => {
     fills.push(e.text)
 
@@ -655,7 +666,10 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
     return { value: undefined }
   })
   on('ui.panes', () => ({
-    value: sessionsPaneIs === 'gone' ? [] : [{ id: 'sessions', title: 'Sessions', isShown: sessionsPaneIs === 'shown', isFocused: false, isPlaced: true }],
+    value: [
+      ...(sessionsPaneIs === 'gone' ? [] : [{ id: 'sessions', title: 'Sessions', isShown: sessionsPaneIs === 'shown', isFocused: false, isPlaced: true }]),
+      ...(dropsPaneIs === 'gone' ? [] : [{ id: 'drops', title: 'Drops', isShown: true, isFocused: false, isPlaced: true }]),
+    ],
   }))
   on('command.list', () => ({ value: [] }))
   on('command.register', ($$, e) => ({ value: { command: e.name } }))
@@ -2320,6 +2334,18 @@ test('an empty inbox says so', async ($, on) => {
   await inboxStart($, on, [])
 
   expect(await (await dropsPane($)).find({ text: 'aucun fichier reçu — glisse-en un dans ~/inbox du PC' })).toBeDefined()
+})
+
+test('the Drops tab\'s ages keep moving while it is shown: a tick writes the atom, and not while it is gone', async ($, on) => {
+  const clock = await inboxStart($, on, [entry('rapport.pdf', 10, T0 - 60_000)])
+  inboxWrites.length = 0
+  await clock.advance(3_000)
+  expect(inboxWrites).toHaveLength(0)
+
+  dropsPaneIs = 'shown'
+  await clock.advance(3_000)
+  expect(inboxWrites.length).toBeGreaterThanOrEqual(1)
+  expect((inboxWrites.at(-1) as { readAt: number }).readAt).toBeGreaterThan(0)
 })
 
 test('a 200-character name: one row, cut, never wrapped', async ($, on) => {
