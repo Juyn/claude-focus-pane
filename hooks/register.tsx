@@ -12,7 +12,8 @@ import type {
 
 import { blocksOf, contentOf, heartbeatOf, parseSnapshot, projectOf, titleOf } from './sessions'
 import type { HostBlock } from './sessions'
-import type { AgentRow, AgentsView, BeatAgent, Doc, Effort, Feature, FeedRow, Gallery, LiveSession, MainLoop, PetCoat, PetStyle, Focus, SessionsView, Skin, Snapshot, Todo, TurnState, Usage } from '../types'
+import { bandDrops, mentionOf, parseTaken, pathOf, sizeOf, stableDrops } from './inbox'
+import type { AgentRow, AgentsView, BeatAgent, Doc, Drop, Effort, Feature, FeedRow, Gallery, InboxView, LiveSession, MainLoop, PetCoat, PetStyle, Focus, SessionsView, Skin, Snapshot, Taken, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
 
@@ -75,6 +76,7 @@ const turn = atom({ plugin: 'focus-pane', key: 'turn' } as const, {
 })
 const feature = atom({ plugin: 'focus-pane', key: 'feature' } as const, null)
 const sessionsView = atom({ plugin: 'focus-pane', key: 'sessionsView' } as const, { own: null, others: [], here: '', readAt: null })
+const inboxView = atom({ plugin: 'focus-pane', key: 'inboxView' } as const, { dir: '', drops: [], taken: {}, dismissed: [], readAt: null })
 const gallery = atom({ plugin: 'focus-pane', key: 'gallery' } as const, { status: 'idle', path: null, shots: [] })
 const petStyle = atom({ plugin: 'focus-pane', key: 'petStyle' } as const, 'sprite')
 const petCoat = atom({ plugin: 'focus-pane', key: 'petCoat' } as const, 'roux')
@@ -3235,6 +3237,81 @@ let agentTicker: Timer | undefined
 let beatWritten = ''
 let beatTimer: Timer | undefined
 
+/** The inbox's last listing (to tell a stable file from one still being written), the band's last offer, and the 3 s timer. */
+let lastListing: { name: string; size: number; mtimeMs: number }[] = []
+let lastOffer = ''
+let inboxTimer: Timer | undefined
+
+/** Reads $HOME/inbox and inbox-taken.json into the atom; writes only when what it draws changed. */
+const readInbox = async ($: EngineInterface) => {
+  const home = await $.env.get('HOME')
+  if (!home) return
+  const dir = `${home}/inbox`
+  const listing = (await $.fs.list(dir).catch(() => []))
+    .filter(one => one.kind === 'file')
+    .map(one => ({ name: one.name, size: one.size, mtimeMs: one.mtimeMs }))
+  const drops = stableDrops(lastListing, listing)
+  lastListing = listing
+  const text = await $.fs.read(`${home}/.cache/focus-pane/inbox-taken.json`).catch(() => '')
+  const taken = parseTaken(typeof text === 'string' ? text : '')
+  const was = await read($, inboxView)
+  const now = await $.clock.now()
+  // The band's offer also changes with time alone (a file older than 10 min leaves it): that is news too.
+  const offer = bandDrops(drops, taken, was.dismissed, now).map(one => one.name).join('\n')
+  const isSame =
+    was.dir === dir && JSON.stringify(was.drops) === JSON.stringify(drops) && JSON.stringify(was.taken) === JSON.stringify(taken) && offer === lastOffer
+  lastOffer = offer
+  if (isSame) return
+  await update($, inboxView, old => ({ ...old, dir, drops, taken, readAt: now }))
+}
+
+/** This session's name as the engine's registry gives it, else its project. */
+const sessionName = async ($: EngineInterface) => {
+  const home = await $.env.get('HOME')
+  const id = await $.session.id().catch(() => '')
+  if (home && id) {
+    const dir = `${home}/.claude/sessions`
+    for (const one of await $.fs.list(dir).catch(() => [])) {
+      if (one.kind !== 'file' || !one.name.endsWith('.json')) continue
+      const text = await $.fs.read(`${dir}/${one.name}`).catch(() => '')
+      try {
+        const entry = JSON.parse(typeof text === 'string' ? text : '') as { sessionId?: unknown; name?: unknown }
+        if (entry.sessionId === id && typeof entry.name === 'string' && entry.name) return entry.name
+      } catch {
+        // A registry file being written: the next one may be ours.
+      }
+    }
+  }
+
+  return projectOf(await $.session.cwd().catch(() => ''))
+}
+
+/** Inserts the file's mention in the prompt and marks it taken; a refused insertion only shows the path. */
+const takeDrop = async ($: EngineInterface, name: string) => {
+  const seen = await read($, inboxView)
+  const filled = await $.prompt.fill({ text: mentionOf(seen.dir, name), mode: 'insert' }).catch(() => ({ isFilled: false }))
+  if (!filled.isFilled) {
+    $.ui.toast(`insertion impossible ici — ${pathOf(seen.dir, name)}`)
+
+    return
+  }
+  const home = await $.env.get('HOME')
+  if (!home) return
+  const file = `${home}/.cache/focus-pane/inbox-taken.json`
+  const text = await $.fs.read(file).catch(() => '')
+  const taken: Record<string, Taken> = {
+    ...parseTaken(typeof text === 'string' ? text : ''),
+    [name]: { sessionId: await $.session.id().catch(() => ''), name: await sessionName($), at: await $.clock.now() },
+  }
+  await $.fs.write(file, JSON.stringify(taken)).catch(() => undefined)
+  await update($, inboxView, was => ({ ...was, taken }))
+}
+
+/** Sets the file aside in this session's band only. */
+const dismissDrop = async ($: EngineInterface, name: string) => {
+  await update($, inboxView, was => (was.dismissed.includes(name) ? was : { ...was, dismissed: [...was.dismissed, name] }))
+}
+
 /** Publishes this session's heartbeat (demo rows are display-only, never published) when what it says changed, or always when `isForced`. */
 const publishBeat = async ($: EngineInterface, isForced = false) => {
   const home = await $.env.get('HOME')
@@ -4130,6 +4207,18 @@ export const register: Register = on => {
     }
     beatTimer = $.clock.every(15_000, () => {
       void publishBeat($, true).catch(() => undefined)
+    })
+    // The inbox: read now, then every 3 s, for the band and the Drops tab; a reload drops the old timer.
+    lastListing = []
+    lastOffer = ''
+    await readInbox($).catch(() => undefined)
+    try {
+      inboxTimer?.cancel()
+    } catch {
+      // A timer of an engine long gone.
+    }
+    inboxTimer = $.clock.every(3_000, () => {
+      void readInbox($).catch(() => undefined)
     })
 
     const branch = await $.process
@@ -5634,6 +5723,33 @@ export const register: Register = on => {
           ['ctrl+x tab', 'Clavier'],
           ['esc', 'Rendre la main'],
         ])}
+      </Box>
+    )
+  })
+
+  // The band above the prompt: the newest file of the inbox nobody took yet; it wraps what the others draw there.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, then) => {
+    const below = await then(e)
+    if (e.props.hasSurvey) return below
+    const seen: InboxView = await read($, inboxView)
+    const offer = bandDrops(seen.drops, seen.taken, seen.dismissed, await $.clock.now())
+    const top = offer[0]
+    if (seen.dir === '' || top === undefined) return below
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const tone = TONES[await read($, skin)]
+    const more = offer.length > 1 ? ` +${offer.length - 1}` : ''
+    const label = `📥 ${top.name} (${sizeOf(top.size)})${more}`
+
+    return (
+      <Box flexDirection="column" width="100%">
+        <Box key="inbox:band" flexDirection="row" width="100%" columnGap={2}>
+          <Text bold color={tone.text} wrap="truncate-end">
+            {cut(label, Math.max(12, e.props.bodyColumns - 30))}
+          </Text>
+          <Button key="inbox:insert" plain hotkey="i" label="insérer" onPress={() => takeDrop($, top.name)} />
+          <Button key="inbox:dismiss" plain hotkey="x" label="ignorer" dimColor onPress={() => dismissDrop($, top.name)} />
+        </Box>
+        {below}
       </Box>
     )
   })

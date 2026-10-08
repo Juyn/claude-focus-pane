@@ -620,11 +620,40 @@ const opened: string[] = []
 /** What $.ui.panes answers about the Sessions tab: shown, behind another tab, or gone. */
 let sessionsPaneIs: 'shown' | 'behind' | 'gone' = 'shown'
 
+/** What $.prompt.fill was asked to insert, and whether it answers filled. */
+const fills: string[] = []
+let isFillRefused = false
+/** What $.ui.copy was asked to copy, and whether it answers copied. */
+const copies: string[] = []
+let isCopyRefused = false
+/** The toasts the plugin showed. */
+const toasts: string[] = []
+
 const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = () => FAILED) => {
   const clock = engine(on)
   runs.length = 0
   opened.length = 0
   sessionsPaneIs = 'shown'
+  fills.length = 0
+  copies.length = 0
+  toasts.length = 0
+  isFillRefused = false
+  isCopyRefused = false
+  on('prompt.fill', ($$, e) => {
+    fills.push(e.text)
+
+    return isFillRefused ? { isFilled: false } : { isFilled: true }
+  })
+  on('ui.copy', ($$, e) => {
+    copies.push(e.text)
+
+    return { value: isCopyRefused ? { isCopied: false, reason: 'no-clipboard' } : { isCopied: true } }
+  })
+  on('ui.toast', ($$, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
   on('ui.panes', () => ({
     value: sessionsPaneIs === 'gone' ? [] : [{ id: 'sessions', title: 'Sessions', isShown: sessionsPaneIs === 'shown', isFocused: false, isPlaced: true }],
   }))
@@ -2121,4 +2150,99 @@ test('the Sessions tab draws on the desktop too', async ($, on) => {
   const pane = await sessionsPane($, 'desktop')
 
   expect(sessionKeys(await pane.drawn())).toHaveLength(6)
+})
+
+const INBOX = '/home/test/inbox'
+const TAKEN = '/home/test/.cache/focus-pane/inbox-taken.json'
+const entry = (name: string, size = 2_400_000, mtimeMs = T0 - 30_000) => ({ name, kind: 'file' as const, size, mtimeMs, isLink: false })
+
+/** A started session whose inbox holds `entries`, read twice (so they are stable). */
+const inboxStart = async ($: Engine, on: On, entries: ReturnType<typeof entry>[]) => {
+  const clock = await start($, on)
+  folders.set(INBOX, entries)
+  await clock.advance(3_000)
+  await clock.advance(3_000)
+
+  return clock
+}
+
+const band = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') =>
+  $.ui.mount({ plugin: 'focus-pane', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} } })
+
+test('a stable new file shows in the band with its size, and only after two reads', async ($, on) => {
+  const clock = await start($, on)
+  folders.set(INBOX, [entry('rapport.pdf')])
+  await clock.advance(3_000)
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+
+  await clock.advance(3_000)
+  const shown = await (await band($)).find({ key: 'inbox:band' })
+  expect(shown?.text).toContain('📥 rapport.pdf (2,3 Mo)')
+})
+
+test('i inserts the mention at the cursor and marks the file taken for every session', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  await (await band($)).press({ key: 'inbox:insert' })
+
+  expect(fills).toEqual(['@/home/test/inbox/rapport.pdf '])
+  const written_ = written.filter(one => one.path === TAKEN).at(-1)
+  expect(JSON.parse(written_?.text ?? '{}')['rapport.pdf']).toMatchObject({ sessionId: 'session-test' })
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+})
+
+test('a file another session took leaves the band', async ($, on) => {
+  const clock = await start($, on)
+  files.set(TAKEN, JSON.stringify({ 'rapport.pdf': { sessionId: 'other', name: 'Paiements', at: T0 } }))
+  folders.set(INBOX, [entry('rapport.pdf')])
+  await clock.advance(3_000)
+  await clock.advance(3_000)
+
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+})
+
+test('x sets the file aside in this session only, and nothing is written', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  await (await band($)).press({ key: 'inbox:dismiss' })
+
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+  expect(written.filter(one => one.path === TAKEN)).toHaveLength(0)
+  expect(fills).toHaveLength(0)
+})
+
+test('several files waiting: the newest, then +N', async ($, on) => {
+  await inboxStart($, on, [entry('a.pdf', 10, T0 - 50_000), entry('b.pdf', 10, T0 - 10_000), entry('c.pdf', 10, T0 - 30_000)])
+  const shown = await (await band($)).find({ key: 'inbox:band' })
+
+  expect(shown?.text).toContain('b.pdf')
+  expect(shown?.text).toContain('+2')
+})
+
+test('after 10 minutes the band forgets the file', async ($, on) => {
+  const clock = await inboxStart($, on, [entry('rapport.pdf', 10, T0 - 30_000)])
+  // In minutes: one advance is capped at 10 000 timer waits, and some intervals are shorter than a second.
+  for (let minute = 0; minute < 10; minute += 1) await clock.advance(60_000)
+
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+})
+
+test('a refused insertion shows the path in a toast and takes nothing', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  isFillRefused = true
+  await (await band($)).press({ key: 'inbox:insert' })
+
+  expect(toasts.some(one => one.includes('/home/test/inbox/rapport.pdf'))).toBe(true)
+  expect(written.filter(one => one.path === TAKEN)).toHaveLength(0)
+})
+
+test('no inbox folder: no band and no error', async ($, on) => {
+  const clock = await start($, on)
+  await clock.advance(6_000)
+
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+})
+
+test('the band draws on the desktop too', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+
+  expect((await (await band($, 'desktop')).find({ key: 'inbox:band' }))?.text).toContain('rapport.pdf')
 })
