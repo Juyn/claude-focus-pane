@@ -95,6 +95,26 @@ export type SessionsView = {
   readAt: number | null
 }
 
+/** One file of the inbox folder, as a session saw it stable. */
+export type Drop = { name: string; size: number; mtimeMs: number }
+
+/** Who took a file of the inbox: the session that inserted it in its prompt. */
+export type Taken = { sessionId: string; name: string; at: number }
+
+/** What the band above the prompt and the Drops tab draw from. */
+export type InboxView = {
+  /** The inbox folder's absolute path; '' while HOME is unknown. */
+  dir: string
+  /** The stable files, newest first, at most INBOX_KEPT. */
+  drops: Drop[]
+  /** inbox-taken.json as last read. */
+  taken: Record<string, Taken>
+  /** The files this session set aside with x (in this session only). */
+  dismissed: string[]
+  /** When what the band or the tab draws last changed; null before the first read. */
+  readAt: number | null
+}
+
 /** How the AGENTS section is shown: rows folded to a line, the finished hidden. */
 export type AgentsView = {
   isFolded: boolean
@@ -181,6 +201,7 @@ declare module 'claude-code' {
       agentsView: AgentsView
       mainLoop: MainLoop
       sessionsView: SessionsView
+      inboxView: InboxView
       usage: Usage
       feature: Feature | null
       gallery: Gallery
