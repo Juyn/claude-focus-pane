@@ -146,9 +146,13 @@ Uninstall with `systemctl --user disable --now focus-pane-sync.service`, then re
 Drop any file in `~/inbox` on the PC (bookmarked in Nautilus as "Vers VPS"): the sync sends new files to
 `~/inbox` on the server every few seconds — never deleting there, and a file already there is never sent
 again (rename it to send a new version). In every session, a band above the prompt offers the newest file:
-`i` inserts its path in the prompt, `x` sets it aside. `/inbox` (or `d` in the pane) opens the Drops tab: the
-20 latest files, the 5 newest set off, each with "insérer" and "copier le chemin". The "Inbox VPS" bookmark
-browses the server's inbox over sftp.
+`i` inserts its path in the prompt, `x` sets it aside — both act once the band has the keyboard (click it, or
+`ctrl+x tab`). `/inbox` (or `d` in the pane) opens the Drops tab: the 20 latest files, the 5 newest set off,
+each with "insérer" and "copier le chemin". The "Inbox VPS" bookmark browses the server's inbox over sftp.
+
+Only files that held still for 10 s leave the PC: never one still being written, never `*.part` /
+`*.crdownload` / `*.tmp`, never an empty file. The upload runs in the background, so a large file never
+stalls the sync. An inbox sync that fails says why in `journalctl --user -u focus-pane-sync`.
 
 A branch that carries a ticket known to a Sacred Book README binds its feature at session start.
 A binding made with `spec` is remembered per checkout and restored at the next session there; outside
