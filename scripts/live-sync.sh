@@ -44,10 +44,11 @@ while :; do
     (
       flock -n 9 || exit 0
       touch -d "@$(( $(date +%s) - 10 ))" "$cache/inbox.ref"
+      # rsync and its ssh get no fd 9: a ControlMaster born here would otherwise hold the lock for its whole life.
       if find "$HOME/inbox" -type f ! -path '*/.*' ! -name '*.part' ! -name '*.crdownload' ! -name '*.tmp' -size +0 \
            ! -newer "$cache/inbox.ref" -printf '%P\0' 2>/dev/null \
          | rsync -rl --from0 --files-from=- --ignore-existing --partial-dir=.rsync-partial --timeout=30 \
-             -e "ssh ${ssh_opts[*]}" "$HOME/inbox/" "$remote:inbox/" >/dev/null 2>"$cache/inbox-sync.err.new"; then
+             -e "ssh ${ssh_opts[*]}" "$HOME/inbox/" "$remote:inbox/" >/dev/null 2>"$cache/inbox-sync.err.new" 9>&-; then
         rm -f "$cache/inbox-sync.err" "$cache/inbox-sync.err.new"
       else
         # Said once in the journal, each time the error changes.
