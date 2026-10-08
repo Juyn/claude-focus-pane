@@ -64,6 +64,25 @@ class SnapshotTest(unittest.TestCase):
         self.session(2, alive=False)
         self.assertEqual(self.ids(self.take()), [])
 
+    def stat(self, pid, comm, start):
+        fields = ['S'] + ['0'] * 18 + [str(start)] + ['0'] * 5  # state is field 3, starttime field 22
+        with open(os.path.join(self.proc, str(pid), 'stat'), 'w', encoding='utf-8') as held:
+            held.write(f'{pid} ({comm}) ' + ' '.join(fields) + '\n')
+
+    def test_a_reused_pid_is_not_listed(self):
+        self.session(5, procStart='1000')
+        self.stat(5, 'claude', 2000)
+        self.assertEqual(self.ids(self.take()), [])
+
+    def test_the_same_process_is_listed_even_when_its_name_has_spaces_and_parentheses(self):
+        self.session(6, procStart='1000')
+        self.stat(6, 'a b) c', 1000)
+        self.assertEqual(self.ids(self.take()), ['s6'])
+
+    def test_an_unreadable_stat_falls_back_to_the_directory(self):
+        self.session(7, procStart='1000')
+        self.assertEqual(self.ids(self.take()), ['s7'])
+
     def test_an_idle_session_is_listed_only_with_running_subagents(self):
         self.session(3, status='idle')
         self.session(4, status='idle')

@@ -31,8 +31,22 @@ def read_json(path):
         return None
 
 
-def is_alive(pid, proc_root):
-    return isinstance(pid, int) and pid > 0 and os.path.exists(os.path.join(proc_root, str(pid)))
+def same_start(pid, proc_root, proc_start):
+    """False only when /proc/<pid>/stat is readable and its starttime (field 22) is not proc_start."""
+    try:
+        with open(os.path.join(proc_root, str(pid), 'stat'), encoding='utf-8') as held:
+            text = held.read()
+        # The command name (field 2) may hold spaces and parentheses: count from the last ')'.
+        rest = text[text.rindex(')') + 2:].split()
+        return rest[19] == str(proc_start)
+    except (OSError, ValueError, IndexError):
+        return True
+
+
+def is_alive(pid, proc_root, proc_start=None):
+    if not (isinstance(pid, int) and pid > 0 and os.path.exists(os.path.join(proc_root, str(pid)))):
+        return False
+    return proc_start is None or same_start(pid, proc_root, proc_start)
 
 
 def heartbeats(live_dir, now):
@@ -74,7 +88,7 @@ def snapshot(home, proc_root, label, now):
         if not name.endswith('.json'):
             continue
         entry = read_json(os.path.join(registry, name))
-        if not isinstance(entry, dict) or not is_alive(entry.get('pid'), proc_root):
+        if not isinstance(entry, dict) or not is_alive(entry.get('pid'), proc_root, entry.get('procStart')):
             continue
         status = entry.get('status')
         if status not in STATUSES:
