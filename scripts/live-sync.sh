@@ -13,17 +13,21 @@ here="$(cd "$(dirname "$0")" && pwd)"
 cache="$HOME/.cache/focus-pane"
 local_host="$(hostname)"
 ssh_cmd=(ssh -o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o ControlPersist=60
-  -o "ControlPath=$cache/ssh-%C" "$remote")
+  -o "ControlPath=$cache/ssh-%C" -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$remote")
 
 mkdir -p "$cache/hosts" "$cache/live"
 printf '%s\n' "$local_label" > "$cache/label"
-"${ssh_cmd[@]}" "mkdir -p ~/.cache/focus-pane/hosts ~/.cache/focus-pane/live && printf '%s\n' '$remote_label' > ~/.cache/focus-pane/label" || true
+remote_ready=0
 
 while :; do
+  # Remote init (retried until ready): mkdir and label.
+  if [ "$remote_ready" = 0 ]; then
+    "${ssh_cmd[@]}" "mkdir -p ~/.cache/focus-pane/hosts ~/.cache/focus-pane/live && printf '%s\n' '$remote_label' > ~/.cache/focus-pane/label" && remote_ready=1 || true
+  fi
   # Ours, here and there.
   if python3 "$here/live_snapshot.py" > "$cache/hosts/$local_host.json.tmp" 2>/dev/null; then
     mv "$cache/hosts/$local_host.json.tmp" "$cache/hosts/$local_host.json"
-    "${ssh_cmd[@]}" "cat > ~/.cache/focus-pane/hosts/$local_host.json.tmp && mv ~/.cache/focus-pane/hosts/$local_host.json.tmp ~/.cache/focus-pane/hosts/$local_host.json" \
+    "${ssh_cmd[@]}" "mkdir -p ~/.cache/focus-pane/hosts && cat > ~/.cache/focus-pane/hosts/$local_host.json.tmp && mv ~/.cache/focus-pane/hosts/$local_host.json.tmp ~/.cache/focus-pane/hosts/$local_host.json" \
       < "$cache/hosts/$local_host.json" 2>/dev/null || true
   fi
   # Theirs, here: only a complete answer replaces the last one.
