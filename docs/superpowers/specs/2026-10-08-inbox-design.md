@@ -30,6 +30,8 @@ machines.
     marque le fichier « pris » par cette session : le bandeau disparaît de toutes les sessions.
   - `x` le retire du bandeau de cette session seulement (il reste dans l'onglet).
   - Plusieurs fichiers en attente : le plus récent dans le bandeau, suivi de `+N`.
+  - Le bandeau s'ajoute à ce que les autres mods dessinent au-dessus du prompt (il enveloppe le
+    dessin de `next(e)`), il ne le remplace pas.
 - **Onglet « Drops »** du dock (pane d'id `drops`), comme « Sessions » : ouvert par `/inbox`, par
   `/mission drops`, et par la touche `d` dans Focus. Les 20 fichiers les plus récents de
   `~/inbox`, du plus récent au plus ancien ; une rangée : nom, taille, âge, puis
@@ -48,9 +50,11 @@ machines.
   `FsEntry` donne `name`, `size`, `mtimeMs`.
 - **Arrivé** : un fichier dont `size` et `mtimeMs` n'ont pas changé entre deux lectures
   consécutives de cette session (jamais un fichier en cours de copie). Son heure d'arrivée est
-  son `mtimeMs`.
+  son `mtimeMs` : sur le VPS, l'heure du transfert (cf. §3) ; sur le PC, la date que la copie a
+  laissée (le bandeau d'une session du PC peut donc ignorer un vieux fichier : l'onglet le liste).
 - **Pris** : `$HOME/.cache/focus-pane/inbox-taken.json`, objet `{ "<nom de fichier>": {
-  "sessionId", "name", "at" } }`. Écrit par la session qui insère (lecture, ajout, écriture
+  "sessionId", "name", "at" } }` — `name` est le nom de la session dans le registre du moteur
+  (`~/.claude/sessions/*.json`, entrée de même `sessionId`), à défaut le dernier dossier de son cwd. Écrit par la session qui insère (lecture, ajout, écriture
   entière) ; lu par toutes à chaque tour. Un fichier corrompu vaut `{}`.
 - **Ignoré** : en mémoire de la session (un `x` ne survit pas à un rechargement du mod — sans
   gravité).
@@ -59,8 +63,11 @@ machines.
 
 - Une étape de plus dans la boucle de `scripts/live-sync.sh` (service `focus-pane-sync`, déjà
   installé), à chaque tour, si `~/inbox` existe sur le PC :
-  `rsync -a --partial-dir=.rsync-partial -e "<ssh avec les options de ssh_cmd>" ~/inbox/ <alias>:inbox/`.
+  `rsync -rl --ignore-existing --partial-dir=.rsync-partial --exclude='.*' --timeout=30 -e "ssh <options de la synchro>" ~/inbox/ <alias>:inbox/`.
   Même connexion persistante (ControlPath), mêmes options (pas de transfert d'agent).
+- **Pas de `-a` ni `-t`** : la date d'un fichier sur le VPS est son **heure d'arrivée** (un PDF
+  vieux d'un an glissé maintenant est « arrivé maintenant »). `--ignore-existing` : un fichier déjà
+  présent sur le VPS n'est jamais renvoyé (pour renvoyer une version modifiée, la renommer).
 - **Jamais de suppression** côté VPS (`--delete` interdit) : effacer sur le PC n'efface pas là-bas.
 - `rsync` écrit dans un fichier temporaire caché puis renomme : aucun fichier tronqué visible
   (et les noms `.…` sont ignorés par le mod).
