@@ -102,6 +102,14 @@ test('a title counts, omits what is zero, and says the lag', () => {
   expect(titleOf({ ...base, isStale: false, age: null })).toBe('VPS')
 })
 
+test('a lag of a minute or more is said in minutes or hours', () => {
+  const base = { host: 'h', label: 'VPS', isStale: true, waiting: [] as LiveSession[], working: [] as LiveSession[] }
+
+  expect(titleOf({ ...base, age: 42_400 })).toBe('VPS · synchro en retard (42 s)')
+  expect(titleOf({ ...base, age: 125_000 })).toBe('VPS · synchro en retard (2m)')
+  expect(titleOf({ ...base, age: 43_200_000 })).toBe('VPS · synchro en retard (12h00)')
+})
+
 test('the project is the last folder of the working directory', () => {
   expect(projectOf('/home/ubuntu/Sites/unlocker-api/')).toBe('unlocker-api')
   expect(projectOf('/home/xavier')).toBe('xavier')

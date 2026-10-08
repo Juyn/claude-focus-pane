@@ -115,13 +115,21 @@ export const blocksOf = (own: Snapshot | null, others: readonly Snapshot[], now:
   return own === null ? rest : [block(own, null), ...rest]
 }
 
+/** A lag as the title says it: seconds under a minute, then minutes (5m), then hours (2h05). */
+const lagOf = (ms: number) => {
+  if (ms < 60_000) return `${Math.round(ms / 1000)} s`
+  const minutes = Math.floor(ms / 60_000)
+
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
+}
+
 /** A block's title: its label, its counts (none at zero), and its lag when it lags. */
 export const titleOf = (block: HostBlock) =>
   [
     block.label,
     ...(block.working.length > 0 ? [`${block.working.length} ${block.working.length === 1 ? 'bosse' : 'bossent'}`] : []),
     ...(block.waiting.length > 0 ? [`${block.waiting.length} ${block.waiting.length === 1 ? 'attend' : 'attendent'}`] : []),
-    ...(block.isStale && block.age !== null ? [`synchro en retard (${Math.round(block.age / 1000)} s)`] : []),
+    ...(block.isStale && block.age !== null ? [`synchro en retard (${lagOf(block.age)})`] : []),
   ].join(' · ')
 
 /** The last folder of a working directory: the project. */
