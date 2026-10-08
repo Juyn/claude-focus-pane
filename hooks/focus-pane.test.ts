@@ -1310,45 +1310,62 @@ const seek = (tree: unknown, wanted: (node: NonNullable<Drawn>) => boolean): Non
   return undefined
 }
 
-test('each tier dresses the crab in its own hat', async ($, on) => {
-  engine(on)
-  for (const [title, effort] of [['Lourd', 'xhigh'], ['Soigné', 'high'], ['Léger', 'low'], ['Moyen', 'medium']] as const) {
-    await step($, await launch($, title), SMALL, effort)
-  }
+/** The avatar of each of `count` launched agents, by id, the pane drawn once. */
+const crabsOf = async ($: Engine, count: number) => {
+  for (let at = 0; at < count; at += 1) await step($, await launch($, `Agent ${at}`), SMALL)
   const pane = await tallPane($)
-  const paint = async (id: string) => paintOf((await pane.find({ key: `agent:ava:${id}` }))?.props.cells)
-  const heavy = await paint('a1')
-  const careful = await paint('a2')
-  const light = await paint('a3')
-  const medium = await paint('a4')
+  const crabs = new Map<string, unknown>()
+  for (let at = 1; at <= count; at += 1) {
+    const cells = (await pane.find({ key: `agent:ava:a${at}` }))?.props.cells
+    if (cells !== undefined) crabs.set(`a${at}`, cells)
+  }
 
-  // The brown bonnet, its red-brown brim and the antenna's light.
-  expect(heavy).toContain('#8a4a1e')
-  expect(heavy).toContain('#b4441c')
-  expect(heavy).toContain('#9ccfff')
-  expect(heavy).toContain('#ec7a58')
-  // The yellow hard hat, its orange badge and the pale spark.
-  expect(careful).toContain('#f2c230')
-  expect(careful).toContain('#c27800')
-  expect(careful).toContain('#b8cce0')
-  expect(careful).not.toContain('#8a4a1e')
-  // The grey hat, its blue band and the cigar's ember.
-  expect(medium).toContain('#b0b0b0')
-  expect(medium).toContain('#2f62b8')
-  expect(medium).toContain('#e0a640')
-  // The green cap, the mast and the checkered flag.
-  expect(light).toContain('#1f8f62')
-  expect(light).toContain('#9a9a9a')
-  expect(light).toContain('#202020')
-  expect(light).not.toContain('#f2c230')
+  return crabs
+}
+
+test('an agent keeps its crab from one drawing to the next', async ($, on) => {
+  engine(on)
+  await step($, await launch($, 'Lourd'), SMALL, 'xhigh')
+  const pane = await tallPane($)
+  const first = (await pane.find({ key: 'agent:ava:a1' }))?.props.cells
+  await step($, 'a1', SMALL, 'xhigh')
+  await step($, 'a1', BIG, 'xhigh')
+  const again = (await pane.find({ key: 'agent:ava:a1' }))?.props.cells
+
+  expect(first).toBeDefined()
+  expect(again).toEqual(first)
 })
 
-/** The glyph of each cell of a Raster. */
-const glyphsOf = (cells: unknown) => cellWords(cells).filter((_word, at) => at % 3 === 0)
+test('the crabs of many agents spread over ten variants, each one wearing the body color', async ($, on) => {
+  engine(on)
+  const crabs = await crabsOf($, 24)
+  const distinct = new Set([...crabs.values()].map(cells => String(cells)))
+
+  expect(crabs.size).toBeGreaterThanOrEqual(20)
+  expect(distinct.size).toBe(10)
+  for (const cells of crabs.values()) expect(paintOf(cells)).toContain('#ec7a58')
+})
 
 /** Block elements (quadrants, halves, eighths), the space, the spark's plus and the bonnet's speck. */
 const AVATAR_GLYPHS = (code: number) => code === 0x20 || code === 0x2b || code === 0xb7 || (code >= 0x2580 && code <= 0x259f)
 const QUADRANTS = [0x2596, 0x2597, 0x2598, 0x2599, 0x259a, 0x259b, 0x259c, 0x259d, 0x259e, 0x259f]
+
+/** The glyph of each cell of a Raster. */
+const glyphsOf = (cells: unknown) => cellWords(cells).filter((_word, at) => at % 3 === 0)
+
+test('every variant of the crab is made of blocks, spaces, pluses and dots, quadrants drawing its legs', async ($, on) => {
+  engine(on)
+  const crabs = await crabsOf($, 24)
+  expect(new Set([...crabs.values()].map(cells => String(cells))).size).toBe(10)
+
+  for (const cells of crabs.values()) {
+    const glyphs = glyphsOf(cells)
+    expect(glyphs).toHaveLength(27)
+    expect(glyphs.filter(code => !AVATAR_GLYPHS(code))).toEqual([])
+    // Half a column wide, the legs and the eyes need quarter cells: half blocks alone cannot draw them.
+    expect(glyphs.some(code => QUADRANTS.includes(code))).toBe(true)
+  }
+})
 
 test('every avatar cell is a block, a space, a plus or a dot, quadrants drawing its legs', async ($, on) => {
   engine(on)
@@ -1361,7 +1378,6 @@ test('every avatar cell is a block, a space, a plus or a dot, quadrants drawing 
     const glyphs = glyphsOf((await pane.find({ key: `agent:ava:${id}` }))?.props.cells)
     expect(glyphs).toHaveLength(27)
     expect(glyphs.filter(code => !AVATAR_GLYPHS(code))).toEqual([])
-    // Half a column wide, the legs and the eyes need quarter cells: half blocks alone cannot draw them.
     expect(glyphs.some(code => QUADRANTS.includes(code))).toBe(true)
   }
 })
@@ -1385,7 +1401,7 @@ test('a planned task wears the bare crab, faded, and its two lines are centered'
   const demo = await tallPane($)
   const planned = rasterKeys(await demo.drawn()).filter(key => key.startsWith('agent:ava:todo-'))
   expect(planned.length).toBeGreaterThan(0)
-  const hats = ['#8a4a1e', '#9ccfff', '#f2c230', '#1f8f62', '#b4441c', '#d99a10', '#2f62b8', '#b0b0b0', '#c27800']
+  const hats = ['#b8b8bc', '#3a3a42', '#3b5bdb', '#f2c14e', '#ffffff', '#fcd1ff', '#e5484d', '#3fcc8c']
   const row = seek(await demo.drawn(), node => String(node.props?.key).startsWith('agents:todo:'))
   expect(row?.children?.some(child => (child as Drawn)?.props?.justifyContent === 'center')).toBe(true)
   for (const key of planned) {

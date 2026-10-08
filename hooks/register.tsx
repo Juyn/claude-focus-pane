@@ -3322,10 +3322,9 @@ const joined = (was: string[] | undefined, more: string[]) => [...new Set([...(w
  * `L.L..L.L`. Letters name a color of the sprite's palette, `.` is the ground; a cell holds
  * two colors at most, foreground and background, and the grids keep to it.
  *
- * A few cells (`fine`, keyed `row,column` in cells) take a finer glyph than a quadrant: ▃, a
- * lower three eighths, for a thin brim or band under a crown; the careful spark's `+`; the
- * bonnet's speck `·`. Their colors are a letter for the foreground and one for the
- * background, the ground when absent.
+ * A few cells (`fine`, keyed `row,column` in cells) may take a finer glyph than a quadrant: ▃,
+ * a lower three eighths, for a thin brim or band; `+`; `·`. Their colors are a letter for the
+ * foreground and one for the background, the ground when absent. No variant needs one today.
  */
 const AVATAR_COLUMNS = 9
 const AVATAR_ROWS = 3
@@ -3335,71 +3334,132 @@ type Sprite = {
   palette: Record<string, string>
   fine?: Record<string, readonly [glyph: string, fore: string, back?: string]>
 }
-const SPRITES: Record<Tier | 'none', Sprite> = {
-  // A speckled brown bonnet on a red-brown brim; the right arm up, holding the antenna's light.
-  heavy: {
-    grid: [
-      '.....HHHH...QQQ...',
-      '..BBHHHHHHBB.Q....',
-      '...OKOOOOKOOOO....',
-      '.OOOOOOOOOO.......',
-      '...OOOOOOOO.......',
-      '...O.O..O.O.......',
-    ],
-    palette: { ...BODY, H: '#8a4a1e', l: '#c98a55', B: '#b4441c', Q: '#9ccfff' },
-    fine: { '0,1': ['▃', 'B'], '0,3': ['·', 'l', 'H'], '0,5': ['▃', 'B'] },
-  },
-  // A yellow hard hat, its orange badge and darker brim; a pale spark by its side.
-  careful: {
-    grid: [
-      '.....YccY.........',
-      '..BBYYYYYYBB......',
-      '...OKOOOOKO.......',
-      '.OOOOOOOOOOOO.....',
-      '...OOOOOOOO.......',
-      '...O.O..O.O.......',
-    ],
-    palette: { ...BODY, Y: '#f2c230', c: '#c27800', B: '#d99a10', s: '#b8cce0' },
-    fine: { '0,0': ['+', 's'], '0,1': ['▃', 'B'], '0,5': ['▃', 'B'] },
-  },
-  // A grey hat with a blue band; the right arm up, under the cigar and its ember.
-  medium: {
-    grid: [
-      '....GGGGGG........',
-      '..GGbbbbbbxxt.....',
-      '...OKOOOOKOOO.....',
-      '.OOOOOOOOOO.......',
-      '...OOOOOOOO.......',
-      '...O.O..O.O.......',
-    ],
-    palette: { ...BODY, G: '#b0b0b0', b: '#2f62b8', x: '#3a3a3a', t: '#e0a640' },
-    fine: { '0,1': ['▃', 'G'], '0,2': ['▃', 'b', 'G'], '0,3': ['▃', 'b', 'G'], '0,4': ['▃', 'b', 'G'], '0,5': ['▃', 'x'] },
-  },
-  // A green cap with its white stripe; the right arm up, holding a mast and a checkered flag.
-  light: {
-    grid: [
-      '....GGGGGG...PWk..',
-      '...GGGGWGGG..PkW..',
-      '...OKOOOOKOOOO....',
-      '.OOOOOOOOOO.......',
-      '...OOOOOOOO.......',
-      '...O.O..O.O.......',
-    ],
-    palette: { ...BODY, G: '#1f8f62', W: '#e8ece6', P: '#9a9a9a', k: '#202020' },
-  },
-  // Bare: a head where the hat would be.
-  none: {
-    grid: [
-      '..................',
-      '...OOOOOOOO.......',
-      '...OKOOOOKO.......',
-      '.OOOOOOOOOOOO.....',
-      '...OOOOOOOO.......',
-      '...O.O..O.O.......',
-    ],
-    palette: BODY,
-  },
+
+/** The accessories' colors, the mock-up's: grey, dark, blue, yellow, white, pink, red, green. */
+const GEAR = { g: '#B8B8BC', n: '#3A3A42', b: '#3B5BDB', y: '#F2C14E', w: '#FFFFFF', p: '#FCD1FF', r: '#E5484D', v: '#3FCC8C' }
+const dressed = (grid: readonly string[]): Sprite => ({ grid, palette: { ...BODY, ...GEAR } })
+
+/** Bare: a head where a hat would be. A planned task wears it. */
+const BARE: Sprite = {
+  grid: [
+    '..................',
+    '...OOOOOOOO.......',
+    '...OKOOOOKO.......',
+    '.OOOOOOOOOOOO.....',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ],
+  palette: BODY,
 }
+
+/**
+ * Ten variants of the crab, from the mock-up's "ten versions" (the logo left out): the hat or the
+ * accessory on the top two quarter rows, the eyes on the third. An agent wears one of them,
+ * picked by its id (`variantOf`); the tier is written in its row, not worn.
+ */
+const VARIANTS: readonly Sprite[] = [
+  // Original: a grey hat on a blue band, a pencil in the right hand.
+  dressed([
+    '....gggggg..y.....',
+    '...bbbbbbbb.y.....',
+    '...OKOOOOKO.y.....',
+    '.OOOOOOOOOOOy.....',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Cap: a dark cap and its visor, a glint on it; the right claw up, waving.
+  dressed([
+    '....nwnnnn........',
+    '..nnnnnnnnnnO.....',
+    '...OKOOOOKOOO.....',
+    '.OOOOOOOOOO.......',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Key: a bare head, the right claw up, holding a golden key.
+  dressed([
+    '.............yy...',
+    '...OOOOOOOO...y...',
+    '...OKOOOOKOOOOyy..',
+    '.OOOOOOOOOO.......',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Top hat: a dark crown, a pink ribbon, a wide brim.
+  dressed([
+    '....nnnnnn........',
+    '...nppppppnn......',
+    '...OKOOOOKO.......',
+    '.OOOOOOOOOOOO.....',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Site: a yellow helmet, a grey wrench in the right hand.
+  dressed([
+    '....yyyyyy..g.g...',
+    '..yyyyyyyyyy.g....',
+    '...OKOOOOKOOOg....',
+    '.OOOOOOOOOOOOg....',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Crown: two golden prongs, a blue stone and a red one.
+  dressed([
+    '....yy..yy........',
+    '...ybyyyyry.......',
+    '...OKOOOOKO.......',
+    '.OOOOOOOOOOOO.....',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Glasses: no hat, two dark lenses, a white glint on each.
+  dressed([
+    '..................',
+    '...OOOOOOOO.......',
+    '..KKwKKKKwKK......',
+    '.OOOKKOOKKOOO.....',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Beanie: a pink bonnet, a white pompom.
+  dressed([
+    '......ww..........',
+    '...pppppppp.......',
+    '...OKOOOOKO.......',
+    '.OOOOOOOOOOOO.....',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+  // Asleep: eyes shut, arms down, a z above the head.
+  dressed([
+    '............www...',
+    '...OOOOOOOO..w....',
+    '...OOOOOOOO.www...',
+    '...OKKOOKKO.......',
+    '.OOOOOOOOOOOO.....',
+    '...O.O..O.O.......',
+  ]),
+  // Bravo: both claws up, confetti over the head.
+  dressed([
+    '....pp..yy....v.b.',
+    '.O.OOOOOOOO.O.....',
+    '.OOOKOOOOKOOOO....',
+    '...OOOOOOOO.......',
+    '...OOOOOOOO.......',
+    '...O.O..O.O.......',
+  ]),
+]
+
+/** A string's FNV-1a hash, 32 bits: stable from one render to the next, spread over close ids. */
+const hashOf = (text: string) => {
+  let hash = 0x811c9dc5
+  for (let at = 0; at < text.length; at += 1) hash = Math.imul(hash ^ text.charCodeAt(at), 0x01000193)
+
+  return hash >>> 0
+}
+
+/** The variant an agent wears, by its id: always the same one. */
+const variantOf = (seed: string | null): Sprite => (seed === null ? BARE : (VARIANTS[hashOf(seed) % VARIANTS.length] ?? BARE))
 
 /** `hex` and `toward` blended, `share` of the way. */
 const mixHex = (hex: string, toward: string, share: number) => {
@@ -3437,11 +3497,12 @@ const QUADRANTS: Record<string, number> = {
 }
 
 /**
- * The crab's cells, row-major. A planned task has no tier yet: the bare crab, faded toward
- * the ground (not under an ansi theme, whose ground is the terminal's own).
+ * The crab's cells, row-major. An agent wears the variant its `seed` (its id) picks; a planned
+ * task has no agent yet: the bare crab, faded toward the ground (not under an ansi theme,
+ * whose ground is the terminal's own).
  */
-const avatarGlyphs = (tier: Tier | null, isPlanned: boolean, ground: string | undefined): AvatarCell[] => {
-  const sprite = SPRITES[isPlanned ? 'none' : (tier ?? 'none')]
+const avatarGlyphs = (seed: string | null, isPlanned: boolean, ground: string | undefined): AvatarCell[] => {
+  const sprite = isPlanned ? BARE : variantOf(seed)
   const paint = (letter: string | undefined) => {
     const hex = letter === undefined ? undefined : sprite.palette[letter]
 
@@ -4867,8 +4928,8 @@ export const register: Register = on => {
     }
     const shown = lines.slice(0, kept)
 
-    const avatar = (key: string, tier: Tier | null, isPlanned: boolean) => {
-      const cells = avatarGlyphs(tier, isPlanned, tone.card)
+    const avatar = (key: string, seed: string | null, isPlanned: boolean) => {
+      const cells = avatarGlyphs(seed, isPlanned, tone.card)
 
       return (
         <Box flexShrink={0} width={isCells ? AVATAR_COLUMNS : undefined}>
@@ -4928,7 +4989,7 @@ export const register: Register = on => {
 
       return (
         <Box key={`agents:row:${row.id}`} flexDirection="row" width="100%" columnGap={1} marginTop={isFirst ? 1 : undefined}>
-          {isAvatar && avatar(`agent:ava:${row.id}`, tier, false)}
+          {isAvatar && avatar(`agent:ava:${row.id}`, row.id, false)}
           <Box flexDirection="column" flexGrow={1} flexShrink={1}>
             <Box flexDirection="row" width="100%" justifyContent="space-between">
               <Text bold color={tone.text} backgroundColor={tone.card} wrap="truncate-end">
