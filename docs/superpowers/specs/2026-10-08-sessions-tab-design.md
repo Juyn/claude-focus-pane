@@ -21,8 +21,10 @@ contexte par session, filtres et tris personnalisables, plus de deux machines.
 - Un onglet du dock **« Sessions »** (pane d'id `sessions`), à côté de « Focus », comme
   « Maquettes ». Il s'ouvre par `/mission sessions` et par un bouton `s` dans la légende de Focus.
 - **Un bloc par machine**, la machine courante d'abord. Titre : `<libellé> · N bossent · M attendent`
-  (les morceaux à zéro sont omis), ou `<libellé> · synchro en retard (42 s)` quand l'instantané de
-  cette machine a plus de 15 s, ou `<libellé> · jamais synchronisé` quand il n'existe pas.
+  (les morceaux à zéro sont omis), suivi de ` · synchro en retard (42 s)` quand l'instantané de
+  cette machine a plus de 15 s. Un bloc sans session montre une ligne `rien ne tourne`. Aucun
+  instantané d'une autre machine : une ligne `autre machine jamais synchronisée (install.sh --sync <alias>)`.
+  Instantané de sa propre machine impossible : une ligne `instantané indisponible (python3 ?)`.
 - Dans un bloc : les sessions **en attente** d'abord (`⏸`, couleur d'alerte `tone.bad`), puis
   celles qui **bossent** (`●`), chaque groupe trié de la plus récente à la plus ancienne
   (`statusUpdatedAt` décroissant). Les sessions au repos sont masquées.
@@ -32,7 +34,6 @@ contexte par session, filtres et tris personnalisables, plus de deux machines.
 - **Sous chaque session**, en retrait de deux cellules, une ligne par **sous-agent en cours** :
   titre, palier, modèle, durée, au format de la ligne repliée d'AGENTS. Rien sous une session sans
   battement (worker sans le mod).
-- Aucune session nulle part : une ligne `rien ne tourne`.
 - Une ligne = une rangée ; l'onglet défile quand il déborde (pas d'ajustement en hauteur).
 
 ## 2. Les données
@@ -66,7 +67,8 @@ Chaque session qui charge le mod écrit `$HOME/.cache/focus-pane/live/<sessionId
 - Réécrit à chaque changement réel de `main` ou de la liste des agents en cours, et toutes les
   15 s par un `$.clock.every` lancé à `session.start` (preuve de vie). Une écriture qui échoue est
   ignorée : le battement ne gêne jamais la session.
-- Effacé à `session.end` (best effort).
+- Pas d'effacement en fin de session (`$.fs` ne sait pas effacer) : le script d'instantané purge
+  les battements de plus de 10 min, et un process mort n'est de toute façon plus listé.
 
 ### 2.3 Ce qui « bosse »
 
@@ -77,9 +79,9 @@ s'il a plus de 10 min.
 
 ## 3. L'instantané et la synchro
 
-### 3.1 `scripts/live-snapshot.py` (nouveau, Python 3 standard, sans dépendance)
+### 3.1 `scripts/live_snapshot.py` (nouveau, Python 3 standard, sans dépendance)
 
-`python3 live-snapshot.py [--label LIBELLÉ]` écrit sur stdout l'instantané JSON de sa machine :
+`python3 live_snapshot.py [--label LIBELLÉ]` écrit sur stdout l'instantané JSON de sa machine :
 
 ```json
 { "v": 1, "host": "<hostname>", "label": "VPS", "takenAt": 1791450000000,
@@ -97,7 +99,7 @@ s'il a plus de 10 min.
 
 - `scripts/live-sync.sh <alias-ssh>` boucle toutes les 3 s :
   1. instantané local → `~/.cache/focus-pane/hosts/<hostname-local>.json` ;
-  2. `ssh <alias> 'python3 ~/.claude/mods/focus-pane/scripts/live-snapshot.py --label VPS'` →
+  2. `ssh <alias> 'python3 ~/.claude/mods/focus-pane/scripts/live_snapshot.py --label VPS'` →
      `~/.cache/focus-pane/hosts/<alias>.json` ;
   3. dépôt de l'instantané local sur le VPS dans `~/.cache/focus-pane/hosts/<hostname-local>.json`.
 
@@ -109,17 +111,18 @@ s'il a plus de 10 min.
 - `install.sh --sync <alias>` installe et démarre `~/.config/systemd/user/focus-pane-sync.service`
   (`Restart=always`, `RestartSec=5`). Sans `--sync`, `install.sh` ne change pas de comportement.
 - La synchro ne lit et n'écrit que dans `~/.cache/focus-pane` des deux machines, et n'exécute sur
-  le VPS que `live-snapshot.py` et ces écritures.
+  le VPS que `live_snapshot.py` et ces écritures.
 
 ### 3.3 Ce que lit l'onglet
 
 Tant que l'onglet est ouvert, toutes les 3 s (`$.clock.every`, annulé à la fermeture) :
 
-- **Sa machine** : `$.process.run(['python3', '<plugin root>/scripts/live-snapshot.py'])`, une
+- **Sa machine** : `$.process.run(['python3', '<plugin root>/scripts/live_snapshot.py'])`, une
   seule logique pour les deux machines.
 - **Les autres** : chaque `~/.cache/focus-pane/hosts/*.json` dont `host` diffère du sien.
-- Le résultat va dans un atome `$.state` `sessionsView` (déclaré au contrat `types/index.d.ts`) ;
-  une écriture identique est évitée (comparer avant `update()`, qui écrit toujours).
+- Les instantanés bruts vont dans un atome `$.state` `sessionsView` (déclaré au contrat
+  `types/index.d.ts`) ; les âges et les durées se calculent au dessin. L'écriture toutes les 3 s
+  n'a lieu que tant que l'onglet est ouvert (les durées affichées avancent de toute façon).
 - Âge d'un instantané distant : `now - takenAt`. Plus de 15 s : « synchro en retard ».
 
 ## 4. Pannes
@@ -150,9 +153,9 @@ Tant que l'onglet est ouvert, toutes les 3 s (`$.clock.every`, annulé à la fer
 
 ## 6. Hypothèses à vérifier en premier, et déploiement
 
-- `$.session.id()` renvoie le même identifiant que le `sessionId` du registre (et non le
-  `hostSessionId` du desktop, `local_…`). À prouver par un test sur une vraie session avant de
-  bâtir dessus ; sinon, rattacher le battement par le `pid` du process qui charge le mod.
+- ✅ Vérifié le 2026-10-08 : `$.session.id()` renvoie « le nom du fichier de transcript », qui est
+  le `sessionId` du registre (session `08287e83…` : registre `1005469.json`, transcript
+  `08287e83….jsonl`), et non le `hostSessionId` du desktop (`local_…`).
 - Le VPS exécute **sa** copie du script : après chaque merge, `git pull` dans
   `~/.claude/mods/focus-pane` sur `factory` (comme pour les commits précédents).
 
