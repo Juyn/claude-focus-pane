@@ -12,7 +12,7 @@ interval="${4:-3}"
 here="$(cd "$(dirname "$0")" && pwd)"
 cache="$HOME/.cache/focus-pane"
 local_host="$(hostname)"
-ssh_cmd=(ssh -o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o ControlPersist=60
+ssh_cmd=(ssh -o BatchMode=yes -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ConnectTimeout=5 -o ControlMaster=auto -o ControlPersist=60
   -o "ControlPath=$cache/ssh-%C" -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$remote")
 
 mkdir -p "$cache/hosts" "$cache/live"
