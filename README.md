@@ -110,8 +110,20 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission pet png` | the cat as a real image (64×36 frames from `assets/frames/`, 9 rows), where the terminal draws pictures (kitty graphics protocol); elsewhere it says so and falls back to `sprite`. `python3 scripts/build-frames.py` cuts the frames |
 | `/mission pet sprite` / `3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: the sprite sheet (12 rows, default), ray-marched 3D (10 rows), line art (9 rows), flat pixels (3 rows), or sent in |
 | `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity — to see it full |
+| `/mission sessions` (or `s` in the pane) | the Sessions tab: what is running or waiting, on this machine and on the one the sync reflects, including subagents |
 
 With the keyboard in the pane (click it, or `ctrl+x tab`): `m` mockup thumbnails, `o` open the mockup, `esc` back to the prompt.
+
+### Sessions on two machines
+
+The Sessions tab reads this machine live (`scripts/live_snapshot.py`) and the other one from
+`~/.cache/focus-pane/hosts/`, which `scripts/live-sync.sh` fills every 3 s over SSH. Run the sync on the
+machine that can reach the other (here, the PC reaching the server's alias `factory`):
+
+    ~/.claude/mods/focus-pane/install.sh --sync factory
+
+It installs and starts the user service `focus-pane-sync.service`. The other machine needs this repo at
+`~/.claude/mods/focus-pane` (kept up to date with `git pull`) and `python3`; nothing to install there.
 
 A branch that carries a ticket known to a Sacred Book README binds its feature at session start.
 A binding made with `spec` is remembered per checkout and restored at the next session there; outside

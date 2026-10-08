@@ -4,6 +4,14 @@
 # Idempotent; the previous settings.json is kept beside it as a dated backup.
 set -eu
 
+sync_alias=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --sync) sync_alias="${2:?--sync needs an SSH alias}"; shift 2 ;;
+    *) echo "install.sh: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+
 here=$(cd "$(dirname "$0")" && pwd)
 settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
@@ -44,4 +52,27 @@ for browser in brave chromium google-chrome-stable google-chrome chrome; do
   command -v "$browser" >/dev/null && found=$browser && break
 done
 [ -n "$found" ] || echo "note: no Chromium browser found (mockup thumbnails will be unavailable)"
+
+if [ -n "$sync_alias" ]; then
+  command -v systemctl >/dev/null || { echo "install.sh: systemctl is required for --sync" >&2; exit 1; }
+  unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  mkdir -p "$unit_dir"
+  cat > "$unit_dir/focus-pane-sync.service" <<UNIT
+[Unit]
+Description=focus-pane: live sessions mirrored with $sync_alias
+After=network-online.target
+
+[Service]
+ExecStart=$here/scripts/live-sync.sh $sync_alias
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+  systemctl --user daemon-reload
+  systemctl --user enable --now focus-pane-sync.service
+  echo "sync: focus-pane-sync.service running against $sync_alias"
+fi
+
 echo "Start a NEW Claude Code session: plugin folders are read at process start."
