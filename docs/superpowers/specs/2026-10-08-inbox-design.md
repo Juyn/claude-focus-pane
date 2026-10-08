@@ -91,12 +91,15 @@ machines.
 - **Synchro** : vérification statique (`bash -n`, `sh -n`), puis recette réelle après accord :
   un fichier glissé dans `~/inbox` du PC arrive sur le VPS et dans le bandeau d'une session SSH.
 
-## 6. À vérifier en premier
+## 6. Vérifié le 2026-10-08 (sonde jetable, session desktop locale)
 
-- `$.prompt.fill` sur une session SSH pilotée par le desktop : insère-t-il vraiment dans le prompt
-  affiché ? (le contrat dit `isFilled: false` sous un dialogue ou sans interface).
-- `$.ui.copy` sur la surface `desktop` d'une session distante (la doc dit « a remote surface has
-  no path yet » : le repli par toast est le chemin attendu).
+- `$.prompt.fill({ text, mode: 'insert' })` depuis l'appui d'un bouton d'un pane : `{ isFilled: true }`,
+  le texte est bien arrivé dans le prompt affiché (surface `desktop`).
+- `$.ui.copy({ text, surface: press.surface })` : `{ isCopied: true }` sur `desktop`, malgré la note
+  de la doc (« a remote surface has no path yet »). Les replis par toast du §4 restent, pour les
+  surfaces où ce ne serait pas le cas.
+- Réserve : testé dans une session desktop locale ; une session SSH passe par la même surface
+  `desktop`, la recette finale le confirme sur `factory`.
 
 ## 7. Gates
 
