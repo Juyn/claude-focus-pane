@@ -617,11 +617,17 @@ const FAILED: Ran = { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: fa
 const runs: string[][] = []
 /** Every tab id $.ui.open was asked for by a started session, in order. */
 const opened: string[] = []
+/** What $.ui.panes answers about the Sessions tab: shown, behind another tab, or gone. */
+let sessionsPaneIs: 'shown' | 'behind' | 'gone' = 'shown'
 
 const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = () => FAILED) => {
   const clock = engine(on)
   runs.length = 0
   opened.length = 0
+  sessionsPaneIs = 'shown'
+  on('ui.panes', () => ({
+    value: sessionsPaneIs === 'gone' ? [] : [{ id: 'sessions', title: 'Sessions', isShown: sessionsPaneIs === 'shown', isFocused: false, isPlaced: true }],
+  }))
   on('command.list', () => ({ value: [] }))
   on('command.register', ($$, e) => ({ value: { command: e.name } }))
   on('session.start', ($$, e) => ({ cwd: e.cwd }))
@@ -2018,6 +2024,29 @@ test('the tab reads again every 3 s while open', async ($, on) => {
   await clock.advance(3_000)
 
   expect(reads()).toBe(before + 1)
+})
+
+test('the 3 s refresh stops for good once the Sessions tab is gone', async ($, on) => {
+  const clock = await sessionsStart($, on, OWN, [])
+  const reads = () => runs.filter(argv => argv.some(one => one.endsWith('/scripts/live_snapshot.py'))).length
+  sessionsPaneIs = 'gone'
+  const before = reads()
+  await clock.advance(3_000)
+  expect(reads()).toBe(before)
+  sessionsPaneIs = 'shown'
+  await clock.advance(3_000)
+
+  expect(reads()).toBe(before)
+})
+
+test('the 3 s refresh skips the read while the Sessions tab is behind another tab', async ($, on) => {
+  const clock = await sessionsStart($, on, OWN, [])
+  const reads = () => runs.filter(argv => argv.some(one => one.endsWith('/scripts/live_snapshot.py'))).length
+  sessionsPaneIs = 'behind'
+  const before = reads()
+  await clock.advance(3_000)
+
+  expect(reads()).toBe(before)
 })
 
 test('the Focus pane offers s for the Sessions tab', async ($, on) => {

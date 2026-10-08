@@ -3274,7 +3274,13 @@ const readSessions = async ($: EngineInterface) => {
 const keepSessionsFresh = ($: EngineInterface) => {
   if (sessionsTimer !== undefined) return
   sessionsTimer = $.clock.every(3_000, () => {
-    void readSessions($).catch(() => undefined)
+    void (async () => {
+      const pane = (await $.ui.panes().catch(() => [])).find(one => one.id === SESSIONS)
+      // The tab is gone: no more reading. Behind another tab: this tick is skipped.
+      if (pane === undefined) return stopSessions()
+      if (!pane.isShown) return
+      await readSessions($)
+    })().catch(() => undefined)
   })
 }
 
