@@ -3230,12 +3230,12 @@ let agentTicker: Timer | undefined
 let beatWritten = ''
 let beatTimer: Timer | undefined
 
-/** Publishes this session's heartbeat when what it says changed, or always when `isForced`. */
+/** Publishes this session's heartbeat (demo rows are display-only, never published) when what it says changed, or always when `isForced`. */
 const publishBeat = async ($: EngineInterface, isForced = false) => {
   const home = await $.env.get('HOME')
   if (!home) return
   const id = await $.session.id()
-  const beat = heartbeatOf(id, await $.clock.now(), await read($, mainLoop), (await read($, turn)).isRunning, await read($, agents))
+  const beat = heartbeatOf(id, await $.clock.now(), await read($, mainLoop), (await read($, turn)).isRunning, (await read($, agents)).filter(one => !one.id.startsWith('demo-')))
   const content = contentOf(beat)
   if (!isForced && content === beatWritten) return
   beatWritten = content

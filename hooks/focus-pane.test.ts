@@ -25,6 +25,8 @@ const files = new Map<string, string>()
 const folders = new Map<string, FsEntry[]>()
 /** What $.env.get answers for HOME: a test unsets it to play a session with no home. */
 let home: string | undefined
+/** When set, the fs.write mock refuses. */
+let isWriteRefused = false
 
 /** The engine beneath the plugin: the test answers for it. */
 const engine = (on: On, theme = 'dark') => {
@@ -34,10 +36,12 @@ const engine = (on: On, theme = 'dark') => {
   files.clear()
   folders.clear()
   home = '/home/test'
+  isWriteRefused = false
   on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? home : undefined }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('session.id', () => ({ value: 'session-test' }))
   on('fs.write', (_$, e) => {
+    if (isWriteRefused) throw new Error('write refused')
     written.push({ path: e.path, text: e.text })
 
     return { value: undefined }
@@ -1368,6 +1372,24 @@ test('with no HOME nothing is written, and a subagent still starts', async ($, o
 
   expect(id).not.toBe('')
   expect(beats()).toHaveLength(0)
+  expect(written.filter(one => one.path.includes('/.cache/focus-pane/live/'))).toEqual([])
+})
+
+test('a refused write of the heartbeat leaves a subagent starting', async ($, on) => {
+  await start($, on)
+  isWriteRefused = true
+  const id = await launch($, 'Écriture refusée')
+
+  expect(id).not.toBe('')
+})
+
+test('the demo agents are never published in the heartbeat', async ($, on) => {
+  const clock = await start($, on)
+  await $.command.run({ command: 'mission', args: 'demo', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await clock.advance(15_000)
+
+  expect(beats().length).toBeGreaterThan(0)
+  expect(beats().at(-1)?.agents.filter(one => one.id.startsWith('demo-'))).toEqual([])
 })
 
 /** The demo in a docked pane of `columns` by `rows`: the bound feature, 8 todos, the default cat. */
