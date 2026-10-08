@@ -2499,6 +2499,19 @@ test('the Drops tab draws on the desktop too', async ($, on) => {
   expect(dropRows(await (await dropsPane($, 'desktop')).drawn())).toHaveLength(7)
 })
 
+test('in the Drops tab, insérer is the primary action and the other buttons read dim', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  const pane = await dropsPane($, 'desktop')
+  const insert = await pane.find({ key: 'drops:insert:0' })
+  const copy = await pane.find({ key: 'drops:copy:0' })
+  const back = await pane.find({ key: 'drops:back' })
+
+  expect((insert as unknown as Drawn | undefined)?.props?.variant).toBe('primary')
+  expect((insert as unknown as Drawn | undefined)?.props?.plain).toBeUndefined()
+  expect((copy as unknown as Drawn | undefined)?.props?.dimColor).toBe(true)
+  expect((back as unknown as Drawn | undefined)?.props?.dimColor).toBe(true)
+})
+
 test('a narrow pane keeps both buttons: the taker name is cut and every text of the row truncates', async ($, on) => {
   const clock = await start($, on)
   const taker = 'abcdefghij'.repeat(4)

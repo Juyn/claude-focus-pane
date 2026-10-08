@@ -5489,8 +5489,8 @@ export const register: Register = on => {
                 </Box>
               )}
               <Box flexShrink={0} flexDirection="row" columnGap={2}>
-                <Button key="gallery:open" plain hotkey="m" label="miniatures" onPress={() => undefined} />
-                <Button key="design:open" plain hotkey="o" label="ouvrir ↗" onPress={() => undefined} />
+                <Button key="gallery:open" plain hotkey="m" label="miniatures" dimColor onPress={() => undefined} />
+                <Button key="design:open" plain hotkey="o" label="ouvrir ↗" dimColor onPress={() => undefined} />
               </Box>
             </Box>
           )}
@@ -5638,8 +5638,8 @@ export const register: Register = on => {
             )}
           </Box>
           <Box flexDirection="row" columnGap={2}>
-            {design && <Button key="design:open" plain hotkey="o" label="ouvrir ↗" onPress={() => undefined} />}
-            <Button key="gallery:back" plain hotkey="b" label="retour" onPress={() => undefined} />
+            {design && <Button key="design:open" plain hotkey="o" label="ouvrir ↗" dimColor onPress={() => undefined} />}
+            <Button key="gallery:back" plain hotkey="b" label="retour" dimColor onPress={() => undefined} />
           </Box>
         </Box>
 
@@ -5754,7 +5754,7 @@ export const register: Register = on => {
       <Box flexDirection="column" width="100%" minHeight={e.props.scroll.bodyRows} paddingX={1} rowGap={1} backgroundColor={tone.panel}>
         <Box flexDirection="row" width="100%" justifyContent="space-between" columnGap={2} paddingRight={HEADER_CLEARANCE}>
           {chip(parts, 'SESSIONS', tone.liveBackground, tone.liveText)}
-          <Button key="sessions:back" plain hotkey="b" label="retour" onPress={() => undefined} />
+          <Button key="sessions:back" plain hotkey="b" label="retour" dimColor onPress={() => undefined} />
         </Box>
         {seen.readAt === null && <Text {...quiet(tone, tone.panel)}>lecture en cours…</Text>}
         {seen.readAt !== null && seen.own === null && (
@@ -5802,7 +5802,7 @@ export const register: Register = on => {
               <Text {...quiet(tone, tone.panel)} wrap="truncate-end">{right}</Text>
             </Box>
             <Box flexDirection="row" columnGap={1} flexShrink={0}>
-              <Button key={`drops:insert:${rank}`} plain label="insérer" onPress={() => takeDrop($, one.name)} />
+              <Button key={`drops:insert:${rank}`} variant="primary" label="insérer" onPress={() => takeDrop($, one.name)} />
               <Button
                 key={`drops:copy:${rank}`}
                 plain
@@ -5824,7 +5824,7 @@ export const register: Register = on => {
       <Box flexDirection="column" width="100%" minHeight={e.props.scroll.bodyRows} paddingX={1} rowGap={1} backgroundColor={tone.panel}>
         <Box flexDirection="row" width="100%" justifyContent="space-between" columnGap={2} paddingRight={HEADER_CLEARANCE}>
           {chip(parts, 'DROPS', tone.liveBackground, tone.liveText)}
-          <Button key="drops:back" plain hotkey="b" label="retour" onPress={() => undefined} />
+          <Button key="drops:back" plain hotkey="b" label="retour" dimColor onPress={() => undefined} />
         </Box>
         {seen.drops.length === 0 && <Text {...quiet(tone, tone.panel)}>aucun fichier reçu — glisse-en un dans ~/inbox du PC</Text>}
         <Box flexDirection="column" width="100%">
