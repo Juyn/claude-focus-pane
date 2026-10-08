@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { ConfigRow, FsEntry, On, TurnUsage } from 'claude-code'
-import type { Heartbeat } from '../types'
+import type { Heartbeat, LiveSession, Snapshot } from '../types'
 
 const PANE = 'focus'
 
@@ -432,7 +432,7 @@ test('the pane names the command it was actually granted', async ($, on) => {
 
   const pane = await wide($)
   expect(await pane.find({ text: '  /mission' })).toBeDefined()
-  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
+  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite  s Sessions  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
 })
 
 test('a reload registers the remembered command again', async ($, on) => {
@@ -611,17 +611,32 @@ test('a ticket in a prompt binds its feature, whatever its case', async ($, on) 
   expect(await pane.find({ text: ' UNL-4844 ' })).toBeDefined()
 })
 
-const start = async ($: Engine, on: On) => {
+type Ran = { exitCode: number; stdout: string; stderr: string; isStdoutTruncated: boolean; isStderrTruncated: boolean }
+const FAILED: Ran = { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+/** Every argv $.process.run was called with, in order. */
+const runs: string[][] = []
+/** Every tab id $.ui.open was asked for by a started session, in order. */
+const opened: string[] = []
+
+const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = () => FAILED) => {
   const clock = engine(on)
+  runs.length = 0
+  opened.length = 0
   on('command.list', () => ({ value: [] }))
   on('command.register', ($$, e) => ({ value: { command: e.name } }))
   on('session.start', ($$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/home/xavier/Sites' }))
   on('store.set', () => ({ value: undefined }))
-  on('ui.open', () => ({ value: { isPlaced: true as const } }))
-  on('process.run', () => ({
-    value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-  }))
+  on('ui.open', ($$, e) => {
+    opened.push(e.id)
+
+    return { value: { isPlaced: true as const } }
+  })
+  on('process.run', ($$, e) => {
+    runs.push([...e.argv])
+
+    return { value: run(e.argv) }
+  })
   await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
 
   return clock
@@ -975,12 +990,13 @@ test('no card of its own under AGENTS: the totals sit in the title, right of the
   const title = seek(await pane.drawn(), node => node.props?.key === 'agents:title')
   const kids = (title?.children ?? []) as Drawn[]
   expect(kids).toHaveLength(2)
-  // Left: AGENTS ›. Right: the totals, then the fold button.
+  // Left: AGENTS ›. Right: the totals, then the fold button, then the Sessions button.
   expect(JSON.stringify(kids[0])).toContain('AGENTS ›')
   const right = (kids[1]?.children ?? []) as Drawn[]
-  expect(right).toHaveLength(2)
+  expect(right).toHaveLength(3)
   expect(String(right[0]?.children?.join(''))).toMatch(TOTALS)
   expect(right[1]?.props?.key).toBe('agents:fold')
+  expect(right[2]?.props?.key).toBe('sessions:open')
 })
 
 test('a very long todo title gives way, the totals and the fold button stay whole', async ($, on) => {
@@ -1896,4 +1912,145 @@ test('every running agent unfolds before the todos stop giving way; short of roo
   expect(unfoldedOf(two, ids)).toEqual([ids[1], ids[2]])
   expect(todoRows(two)).toHaveLength(1)
   expect(two).toMatchObject({ type: 'Box', props: { minHeight: 53 } })
+})
+
+const SESSIONS = 'sessions'
+const T0 = 1_700_000_000_000
+
+const live = (over: Partial<LiveSession>): LiveSession => ({
+  sessionId: 's', pid: 1, name: 'n', cwd: '/home/x/proj', origin: 'cli', status: 'busy',
+  statusUpdatedAt: T0 - 60_000, main: null, agents: [], ...over,
+})
+const OWN: Snapshot = {
+  v: 1, host: 'Rocinante', label: 'PC', takenAt: T0,
+  sessions: [
+    live({
+      sessionId: 'session-test', name: 'Mod Claude', origin: 'desktop', statusUpdatedAt: T0 - 5_000,
+      agents: [{ id: 'ag1', title: 'Recherche API', model: 'claude-sonnet-5-5', effort: 'medium', startedAt: T0 - 30_000 }],
+    }),
+    live({ sessionId: 'w1', name: 'Attend', status: 'waiting', statusUpdatedAt: T0 - 120_000 }),
+  ],
+}
+const REMOTE: Snapshot = { v: 1, host: 'claude-vps', label: 'VPS', takenAt: T0 - 42_000, sessions: [live({ sessionId: 'v1', name: 'Paiements', cwd: '/home/ubuntu/Sites' })] }
+const HOSTS = '/home/test/.cache/focus-pane/hosts'
+
+/** A started session whose snapshot script answers `own`, with `remote` left by the sync. */
+const sessionsStart = async ($: Engine, on: On, own: Snapshot | null, remote: Snapshot[]) => {
+  const clock = await start($, on, argv =>
+    argv.some(one => one.endsWith('/scripts/live_snapshot.py')) && own !== null ? { ...FAILED, exitCode: 0, stdout: JSON.stringify(own) } : FAILED,
+  )
+  folders.set(HOSTS, remote.map((_, at) => ({ name: `h${at}.json`, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })))
+  remote.forEach((one, at) => files.set(`${HOSTS}/h${at}.json`, JSON.stringify(one)))
+  await $.command.run({ command: 'mission', args: 'sessions', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+
+  return clock
+}
+
+const sessionsPane = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') =>
+  $.ui.mount({ plugin: 'focus-pane', surface, component: 'Pane', requestId: SESSIONS, props: { ...PROPS, bodyColumns: 100, placement: 'dock' as const } })
+
+/** Every `sessions:` key of a drawn tree, in drawing order. */
+const sessionKeys = (tree: unknown) => {
+  const keys: string[] = []
+  const walk = (node: unknown) => {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return
+    const key = String(one.props?.key ?? '')
+    if (/^sessions:(host|row|agent):/.test(key)) keys.push(key)
+    for (const child of one.children ?? []) walk(child)
+  }
+  walk(tree)
+
+  return keys
+}
+
+test('/mission sessions opens the tab: this machine first, the waiting before the working, subagents under their session', async ($, on) => {
+  await sessionsStart($, on, OWN, [REMOTE])
+  const pane = await sessionsPane($)
+
+  expect(sessionKeys(await pane.drawn())).toEqual([
+    'sessions:host:Rocinante', 'sessions:row:w1', 'sessions:row:session-test', 'sessions:agent:ag1',
+    'sessions:host:claude-vps', 'sessions:row:v1',
+  ])
+})
+
+test('a row names the session, (ici), its project, origin and time; a subagent its tier and model', async ($, on) => {
+  await sessionsStart($, on, OWN, [REMOTE])
+  const pane = await sessionsPane($)
+  const here = await pane.find({ key: 'sessions:row:session-test' })
+  const agent = await pane.find({ key: 'sessions:agent:ag1' })
+
+  expect(here?.text).toContain('Mod Claude (ici)')
+  expect(here?.text).toContain('proj · desktop · 5s')
+  expect(agent?.text).toContain('Recherche API')
+  expect(agent?.text).toContain('medium')
+  expect(agent?.text).toContain('Sonnet 5.5')
+  expect((await pane.find({ key: 'sessions:row:w1' }))?.text).toContain('⏸')
+})
+
+test('each block says its counts, and a lagging machine its lag', async ($, on) => {
+  await sessionsStart($, on, OWN, [REMOTE])
+  const pane = await sessionsPane($)
+
+  expect((await pane.find({ key: 'sessions:host:Rocinante' }))?.text).toContain('PC · 1 bosse · 1 attend')
+  expect((await pane.find({ key: 'sessions:host:claude-vps' }))?.text).toContain('VPS · 1 bosse · synchro en retard (42 s)')
+})
+
+test('no snapshot from the script and no other machine: the tab says both', async ($, on) => {
+  await sessionsStart($, on, null, [])
+  const pane = await sessionsPane($)
+
+  expect(await pane.find({ text: 'instantané indisponible (python3 ?)' })).toBeDefined()
+  expect(await pane.find({ text: 'autre machine jamais synchronisée (install.sh --sync <alias>)' })).toBeDefined()
+})
+
+test('a machine with nothing running says so', async ($, on) => {
+  await sessionsStart($, on, { ...OWN, sessions: [] }, [])
+  const pane = await sessionsPane($)
+
+  expect(await pane.find({ text: 'rien ne tourne' })).toBeDefined()
+})
+
+test('the tab reads again every 3 s while open', async ($, on) => {
+  const clock = await sessionsStart($, on, OWN, [])
+  const reads = () => runs.filter(argv => argv.some(one => one.endsWith('/scripts/live_snapshot.py'))).length
+  const before = reads()
+  await clock.advance(3_000)
+
+  expect(reads()).toBe(before + 1)
+})
+
+test('the Focus pane offers s for the Sessions tab', async ($, on) => {
+  await start($, on)
+  const pane = await tallPane($)
+  await pane.press({ key: 'sessions:open' })
+
+  expect(opened).toContain('sessions')
+})
+
+test('many sessions with long names: one row each, cut, never wrapped', async ($, on) => {
+  const many = Array.from({ length: 25 }, (_, at) => live({ sessionId: `m${at}`, name: 'x'.repeat(120), statusUpdatedAt: T0 - at * 1_000 }))
+  await sessionsStart($, on, { ...OWN, sessions: many }, [])
+  const pane = await sessionsPane($)
+
+  expect(sessionKeys(await pane.drawn()).filter(key => key.startsWith('sessions:row:'))).toHaveLength(25)
+  for (const at of [0, 24]) {
+    const row = await pane.find({ key: `sessions:row:m${at}` })
+    expect(row?.text.includes('\n')).toBe(false)
+  }
+})
+
+test('a session with no name shows its project; a time from a clock ahead shows 0s', async ($, on) => {
+  await sessionsStart($, on, { ...OWN, sessions: [live({ sessionId: 'nameless', name: '', cwd: '/srv/worker-7', statusUpdatedAt: T0 + 9_000 })] }, [])
+  const row = await (await sessionsPane($)).find({ key: 'sessions:row:nameless' })
+
+  expect(row?.text).toContain('worker-7')
+  expect(row?.text).toContain('0s')
+})
+
+test('the Sessions tab draws on the desktop too', async ($, on) => {
+  await sessionsStart($, on, OWN, [REMOTE])
+  const pane = await sessionsPane($, 'desktop')
+
+  expect(sessionKeys(await pane.drawn())).toHaveLength(6)
 })

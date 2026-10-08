@@ -10,13 +10,17 @@ import type {
   TurnUsage,
 } from 'claude-code'
 
-import { contentOf, heartbeatOf } from './sessions'
-import type { AgentRow, AgentsView, Doc, Effort, Feature, FeedRow, Gallery, MainLoop, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
+import { blocksOf, contentOf, heartbeatOf, parseSnapshot, projectOf, titleOf } from './sessions'
+import type { HostBlock } from './sessions'
+import type { AgentRow, AgentsView, BeatAgent, Doc, Effort, Feature, FeedRow, Gallery, LiveSession, MainLoop, PetCoat, PetStyle, Focus, SessionsView, Skin, Snapshot, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
 
 /** The second pane, a tab beside the first: the bound feature's mockups. */
 const GALLERY = 'maquettes'
+
+/** The third pane: what works or waits now, on this machine and on the ones the sync mirrors. */
+const SESSIONS = 'sessions'
 
 /** A thumbnail's height in pixels: two a terminal row. */
 const THUMB_PIXELS = 34
@@ -70,6 +74,7 @@ const turn = atom({ plugin: 'focus-pane', key: 'turn' } as const, {
   lastMs: null,
 })
 const feature = atom({ plugin: 'focus-pane', key: 'feature' } as const, null)
+const sessionsView = atom({ plugin: 'focus-pane', key: 'sessionsView' } as const, { own: null, others: [], here: '', readAt: null })
 const gallery = atom({ plugin: 'focus-pane', key: 'gallery' } as const, { status: 'idle', path: null, shots: [] })
 const petStyle = atom({ plugin: 'focus-pane', key: 'petStyle' } as const, 'sprite')
 const petCoat = atom({ plugin: 'focus-pane', key: 'petCoat' } as const, 'roux')
@@ -3242,6 +3247,56 @@ const publishBeat = async ($: EngineInterface, isForced = false) => {
   await $.fs.write(`${home}/.cache/focus-pane/live/${id}.json`, JSON.stringify(beat))
 }
 
+/** Refreshes the Sessions tab every 3 s while it is open: a module value, a reload drops it with its timer. */
+let sessionsTimer: Timer | undefined
+
+/** Reads this machine's snapshot (the script) and the others' (the sync's files) into the tab's atom. */
+const readSessions = async ($: EngineInterface) => {
+  const ran = await $.process.run(['python3', `${$.plugin.root}/scripts/live_snapshot.py`]).catch(() => null)
+  const own = ran !== null && ran.exitCode === 0 ? parseSnapshot(ran.stdout) : null
+  const others: Snapshot[] = []
+  const home = await $.env.get('HOME')
+  if (home) {
+    const dir = `${home}/.cache/focus-pane/hosts`
+    for (const one of await $.fs.list(dir).catch(() => [])) {
+      if (one.kind !== 'file' || !one.name.endsWith('.json')) continue
+      const text = await $.fs.read(`${dir}/${one.name}`).catch(() => '')
+      const taken = typeof text === 'string' ? parseSnapshot(text) : null
+      if (taken !== null && taken.host !== own?.host) others.push(taken)
+    }
+  }
+  const here = await $.session.id().catch(() => '')
+  const now = await $.clock.now()
+  await update($, sessionsView, () => ({ own, others, here, readAt: now }))
+}
+
+/** Starts the 3 s refresh unless it runs already. */
+const keepSessionsFresh = ($: EngineInterface) => {
+  if (sessionsTimer !== undefined) return
+  sessionsTimer = $.clock.every(3_000, () => {
+    void readSessions($).catch(() => undefined)
+  })
+}
+
+/** Stops the refresh: the tab was closed. */
+const stopSessions = () => {
+  try {
+    sessionsTimer?.cancel()
+  } catch {
+    // A timer of an engine long gone.
+  }
+  sessionsTimer = undefined
+}
+
+/** Opens the Sessions tab, read once at once, then every 3 s. */
+const openSessions = async ($: EngineInterface) => {
+  await readSessions($).catch(() => undefined)
+  const opened = await $.ui.open({ id: SESSIONS, title: 'Sessions', focus: true })
+  keepSessionsFresh($)
+
+  return opened
+}
+
 /** Starts or stops the ticker after each write of the rows. */
 const tick = async ($: EngineInterface) => {
   try {
@@ -4195,6 +4250,12 @@ export const register: Register = on => {
       return { text: `Focus pane: données de démonstration (${fake.length} étapes).` }
     }
 
+    if (args === 'sessions') {
+      const opened = await openSessions($)
+
+      return { text: opened.isPlaced ? 'Focus pane: onglet Sessions ouvert.' : "Focus pane: élargis le terminal pour l'onglet Sessions." }
+    }
+
     const isMission = args.startsWith('mission ')
     const said = isMission ? args.slice('mission '.length).trim() : args
     const hit = said.match(TICKET)
@@ -4222,6 +4283,12 @@ export const register: Register = on => {
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
     if (e.origin.kind === 'person') await update($, focus, was => ({ ...was, isDismissed: true }))
+
+    return next(e)
+  })
+
+  on('ui.close', { id: SESSIONS }, async ($, e, next) => {
+    stopSessions()
 
     return next(e)
   })
@@ -4563,7 +4630,7 @@ export const register: Register = on => {
   })
 
   on('ui.press', async ($, e, next) => {
-    if (e.requestId !== PANE && e.requestId !== GALLERY) return next(e)
+    if (e.requestId !== PANE && e.requestId !== GALLERY && e.requestId !== SESSIONS) return next(e)
     const [kind, verb] = e.element.split(':')
 
     if (kind === 'bao' && verb === 'plant') {
@@ -4572,6 +4639,10 @@ export const register: Register = on => {
       await $.ui.open({ id: GALLERY, title: 'Maquettes', focus: true }).catch(() => undefined)
       void loadGallery($).catch(() => undefined)
     } else if (kind === 'gallery' && verb === 'back') {
+      await $.ui.open({ id: PANE, title: 'Focus', focus: true }).catch(() => undefined)
+    } else if (kind === 'sessions' && verb === 'open') {
+      await openSessions($).catch(() => undefined)
+    } else if (kind === 'sessions' && verb === 'back') {
       await $.ui.open({ id: PANE, title: 'Focus', focus: true }).catch(() => undefined)
     } else if (kind === 'agents' && verb === 'fold') {
       await update($, agentsView, was => ({ ...was, isFolded: !was.isFolded }))
@@ -5131,7 +5202,7 @@ export const register: Register = on => {
     // in hand gives way to them, never the other way round.
     const totals = hasCards ? `${dollars(sum(one => one.usd))} · ${compact(sum(one => one.tokens))} · ${clock(wall)}` : ''
     const foldLabel = view.isFolded ? 'déplier' : 'replier'
-    const titleRoom = Math.max(8, inner - 'AGENTS ›'.length - 1 - (totals === '' ? 0 : totals.length + 1) - (isEmpty ? 0 : foldLabel.length + 1) - 2)
+    const titleRoom = Math.max(8, inner - 'AGENTS ›'.length - 1 - (totals === '' ? 0 : totals.length + 1) - (isEmpty ? 0 : foldLabel.length + 1) - ('sessions'.length + 1) - 2)
     const mainTier = tierOf(main.effort)
     const mainRight = [main.model === null ? '' : modelName(main.model), spent.percent === null ? '' : `${Math.round(spent.percent)}%`, turnClock ?? '']
       .filter(one => one !== '')
@@ -5180,6 +5251,7 @@ export const register: Register = on => {
             {!isEmpty && (
               <Button key="agents:fold" plain hotkey="r" label={foldLabel} dimColor onPress={() => undefined} />
             )}
+            <Button key="sessions:open" plain hotkey="s" label="sessions" dimColor onPress={() => undefined} />
           </Box>
         </Box>
         {mainRow}
@@ -5306,6 +5378,7 @@ export const register: Register = on => {
       ...(design ? ([['m', 'Miniatures'], ['o', 'Maquette']] as const) : []),
       ...(isBao ? ([['b', 'Bambou']] as const) : []),
       ...(isEmpty ? [] : ([['r', 'Replier']] as const)),
+      ['s', 'Sessions'],
       ['ctrl+x tab', 'Clavier'],
       ['esc', 'Rendre la main'],
       ...(mine === null ? [] : ([[`/${mine}`, 'Rouvrir']] as const)),
@@ -5462,6 +5535,95 @@ export const register: Register = on => {
         <Box flexGrow={1} />
         {legend(parts, tone, [
           ...(design ? ([['o', 'Ouvrir la maquette']] as const) : []),
+          ['b', 'Retour au focus'],
+          ['ctrl+x tab', 'Clavier'],
+          ['esc', 'Rendre la main'],
+        ])}
+      </Box>
+    )
+  })
+
+  // The Sessions tab: what works now, on this machine and on the ones the sync mirrors.
+  on('ui.render', { component: 'Pane', requestId: SESSIONS }, async ($, e) => {
+    const table = $.ui.resolve(e)
+    const { Box, Text, Button } = table
+    const tone = TONES[await read($, skin)]
+    const parts: Elements = { Box, Text, Svg: e.surface !== 'terminal' && 'Svg' in table ? table.Svg : undefined }
+    const room = Math.max(24, e.props.bodyColumns) - 2
+    const inner = room - 4
+    const seen: SessionsView = await read($, sessionsView)
+    const now = await $.clock.now()
+    // After a reload the tab may be up with no timer behind it.
+    keepSessionsFresh($)
+    const blocks: HostBlock[] = blocksOf(seen.own, seen.others, now)
+
+    const sessionRow = (one: LiveSession) => {
+      const isWaiting = one.status === 'waiting'
+      const name = `${one.name || projectOf(one.cwd) || one.sessionId.slice(0, 8)}${one.sessionId === seen.here ? ' (ici)' : ''}`
+      const right = `${projectOf(one.cwd)} · ${one.origin} · ${span(now - one.statusUpdatedAt)}`
+
+      return (
+        <Box key={`sessions:row:${one.sessionId}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
+          <Text backgroundColor={tone.card} wrap="truncate-end">
+            <Text color={isWaiting ? tone.bad : tone.mark} backgroundColor={tone.card}>{isWaiting ? '⏸' : '●'}</Text>
+            <Text bold color={tone.text} backgroundColor={tone.card}>{` ${cut(name, Math.max(8, inner - right.length - 3))}`}</Text>
+          </Text>
+          <Text {...quiet(tone, tone.card)} wrap="truncate-end">{right}</Text>
+        </Box>
+      )
+    }
+
+    const agentRow = (one: BeatAgent) => {
+      const tier = tierOf(one.effort)
+      const right = [one.model === null ? '' : modelName(one.model), clock(now - one.startedAt)].filter(part => part !== '').join(' · ')
+
+      return (
+        <Box key={`sessions:agent:${one.id}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
+          <Text {...quiet(tone, tone.card)} wrap="truncate-end">
+            {`  ↳ ${cut(one.title, Math.max(8, inner - right.length - (tier?.length ?? 0) - 8))}`}
+          </Text>
+          <Text backgroundColor={tone.card} wrap="truncate-end">
+            {tier !== null && <Text bold color={tone.tiers[tier]} backgroundColor={tone.card}>{tier}</Text>}
+            <Text {...quiet(tone, tone.card)}>{`${tier === null ? '' : ' · '}${right}`}</Text>
+          </Text>
+        </Box>
+      )
+    }
+
+    const blockNode = (block: HostBlock) => (
+      <Box
+        key={`sessions:host:${block.host}`}
+        flexDirection="column"
+        width="100%"
+        borderStyle="round"
+        borderColor={tone.frame}
+        backgroundColor={tone.card}
+        paddingX={1}
+      >
+        <Text bold color={block.isStale ? tone.bad : tone.text} backgroundColor={tone.card} wrap="truncate-end">
+          {titleOf(block)}
+        </Text>
+        {block.waiting.length + block.working.length === 0 && <Text {...quiet(tone, tone.card)}>rien ne tourne</Text>}
+        {[...block.waiting, ...block.working].flatMap(one => [sessionRow(one), ...one.agents.map(agentRow)])}
+      </Box>
+    )
+
+    return (
+      <Box flexDirection="column" width="100%" minHeight={e.props.scroll.bodyRows} paddingX={1} rowGap={1} backgroundColor={tone.panel}>
+        <Box flexDirection="row" width="100%" justifyContent="space-between" columnGap={2} paddingRight={HEADER_CLEARANCE}>
+          {chip(parts, 'SESSIONS', tone.liveBackground, tone.liveText)}
+          <Button key="sessions:back" plain hotkey="b" label="retour" onPress={() => undefined} />
+        </Box>
+        {seen.readAt === null && <Text {...quiet(tone, tone.panel)}>lecture en cours…</Text>}
+        {seen.readAt !== null && seen.own === null && (
+          <Text color={tone.bad} backgroundColor={tone.panel}>instantané indisponible (python3 ?)</Text>
+        )}
+        {blocks.map(blockNode)}
+        {seen.readAt !== null && seen.others.length === 0 && (
+          <Text {...quiet(tone, tone.panel)}>autre machine jamais synchronisée (install.sh --sync &lt;alias&gt;)</Text>
+        )}
+        <Box flexGrow={1} />
+        {legend(parts, tone, [
           ['b', 'Retour au focus'],
           ['ctrl+x tab', 'Clavier'],
           ['esc', 'Rendre la main'],
