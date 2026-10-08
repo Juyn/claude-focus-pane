@@ -34,12 +34,15 @@ export const parseTaken = (text: string): Record<string, Taken> => {
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
 
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, Taken] => isTaken(entry[1])))
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, Taken] => entry[0] !== '__proto__' && isTaken(entry[1]))
+  )
 }
 
 /** What the band offers: arrived less than BAND_MS ago, taken by nobody, not set aside in this session. */
 export const bandDrops = (drops: readonly Drop[], taken: Record<string, Taken>, dismissed: readonly string[], now: number) =>
-  drops.filter(one => now - one.mtimeMs < BAND_MS && taken[one.name] === undefined && !dismissed.includes(one.name))
+  drops.filter(one => now - one.mtimeMs < BAND_MS && !Object.hasOwn(taken, one.name) && !dismissed.includes(one.name))
 
 /** A size as people read it, in French units: 512 o, 2,3 Ko, 2,3 Mo, 1,2 Go. */
 export const sizeOf = (bytes: number) => {
@@ -51,7 +54,21 @@ export const sizeOf = (bytes: number) => {
     at += 1
   }
 
-  return at === 0 ? `${bytes} o` : `${value.toFixed(1).replace('.', ',')} ${units[at]}`
+  if (at === 0) {
+    return `${bytes} o`
+  }
+
+  // Round to one decimal
+  let rounded = Math.round(value * 10) / 10
+
+  // If rounded value is >= 1024 and we can go higher, promote
+  while (rounded >= 1_024 && at < units.length - 1) {
+    rounded /= 1_024
+    at += 1
+    rounded = Math.round(rounded * 10) / 10
+  }
+
+  return `${rounded.toFixed(1).replace('.', ',')} ${units[at]}`
 }
 
 /** The file's absolute path. */
