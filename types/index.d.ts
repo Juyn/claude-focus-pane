@@ -55,6 +55,46 @@ export type AgentRow = {
 /** The session's own (main-loop) agent: the model and effort its last request reported. */
 export type MainLoop = { model: string | null; effort: Effort | null }
 
+/** One running subagent, as a session's heartbeat publishes it. */
+export type BeatAgent = { id: string; title: string; model: string | null; effort: Effort | null; startedAt: number }
+
+/** What a session publishes about itself in ~/.cache/focus-pane/live/<sessionId>.json. */
+export type Heartbeat = {
+  v: 1
+  sessionId: string
+  updatedAt: number
+  main: { model: string | null; effort: Effort | null; isRunning: boolean }
+  agents: BeatAgent[]
+}
+
+/** One session that works or waits, as a machine's snapshot lists it. */
+export type LiveSession = {
+  sessionId: string
+  pid: number
+  name: string
+  cwd: string
+  origin: 'desktop' | 'cli' | 'worker'
+  status: 'busy' | 'waiting' | 'idle'
+  statusUpdatedAt: number
+  main: Heartbeat['main'] | null
+  agents: BeatAgent[]
+}
+
+/** A machine's live snapshot, as scripts/live_snapshot.py prints it. */
+export type Snapshot = { v: 1; host: string; label: string; takenAt: number; sessions: LiveSession[] }
+
+/** What the Sessions tab draws from: the snapshots last read, raw; ages are worked out when drawn. */
+export type SessionsView = {
+  /** This machine's snapshot; null when the script gave none. */
+  own: Snapshot | null
+  /** The other machines' snapshots, as the sync left them in ~/.cache/focus-pane/hosts. */
+  others: Snapshot[]
+  /** This session's id, to mark its row (ici). */
+  here: string
+  /** When they were read; null before the first read. */
+  readAt: number | null
+}
+
 /** How the AGENTS section is shown: rows folded to a line, the finished hidden. */
 export type AgentsView = {
   isFolded: boolean
@@ -140,6 +180,7 @@ declare module 'claude-code' {
       agents: AgentRow[]
       agentsView: AgentsView
       mainLoop: MainLoop
+      sessionsView: SessionsView
       usage: Usage
       feature: Feature | null
       gallery: Gallery
