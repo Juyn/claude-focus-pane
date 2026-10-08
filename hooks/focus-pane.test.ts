@@ -2034,9 +2034,29 @@ test('many sessions with long names: one row each, cut, never wrapped', async ($
   const pane = await sessionsPane($)
 
   expect(sessionKeys(await pane.drawn()).filter(key => key.startsWith('sessions:row:'))).toHaveLength(25)
+  const tree = await pane.drawn()
+  const rowOf = (id: string) => {
+    let found: Drawn | undefined
+    const walk = (node: unknown) => {
+      const one = node as Drawn
+      if (!one || typeof one !== 'object') return
+      if (one.props?.key === `sessions:row:${id}`) found = one
+      for (const child of one.children ?? []) walk(child)
+    }
+    walk(tree)
+
+    return found
+  }
   for (const at of [0, 24]) {
-    const row = await pane.find({ key: `sessions:row:m${at}` })
-    expect(row?.text.includes('\n')).toBe(false)
+    const row = rowOf(`m${at}`)
+    // The name is cut: shorter than the 120 characters given, ending with the cut marker.
+    const name = (await pane.find({ key: `sessions:row:m${at}` }))?.text.match(/x+…/)?.[0] ?? ''
+    expect(name.length).toBeGreaterThan(0)
+    expect(name.length).toBeLessThan(120)
+    // Every Text directly in the row truncates instead of wrapping.
+    const texts = ((row?.children ?? []) as Drawn[]).filter(one => one?.type === 'Text')
+    expect(texts).toHaveLength(2)
+    for (const one of texts) expect(one?.props?.wrap).toBe('truncate-end')
   }
 })
 
