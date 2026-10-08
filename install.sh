@@ -71,7 +71,8 @@ RestartSec=5
 WantedBy=default.target
 UNIT
   systemctl --user daemon-reload
-  systemctl --user enable --now focus-pane-sync.service
+  systemctl --user enable focus-pane-sync.service
+  systemctl --user restart focus-pane-sync.service
   echo "sync: focus-pane-sync.service running against $sync_alias"
 fi
 
