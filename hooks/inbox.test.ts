@@ -89,3 +89,10 @@ test('the mention and the path keep an exotic name exactly', () => {
   expect(mentionOf('/home/ubuntu/inbox', name)).toBe(`@"/home/ubuntu/inbox/${name}" `)
   expect(mentionOf('/home/ubuntu/inbox', 'plain.pdf')).toBe('@/home/ubuntu/inbox/plain.pdf ')
 })
+
+test('a path is quoted as soon as it holds a character outside the plain set', () => {
+  expect(mentionOf('/home/ubuntu/inbox', 'résumé.pdf')).toBe('@"/home/ubuntu/inbox/résumé.pdf" ')
+  expect(mentionOf('/home/ubuntu/inbox', 'a b.pdf')).toBe('@"/home/ubuntu/inbox/a b.pdf" ')
+  expect(mentionOf('/home/ubuntu/inbox', 'a(1).pdf')).toBe('@"/home/ubuntu/inbox/a(1).pdf" ')
+  expect(mentionOf('/home/ubuntu/inbox', 'plain-1_x+y.pdf')).toBe('@/home/ubuntu/inbox/plain-1_x+y.pdf ')
+})

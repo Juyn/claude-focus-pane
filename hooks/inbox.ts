@@ -74,9 +74,9 @@ export const sizeOf = (bytes: number) => {
 /** The file's absolute path. */
 export const pathOf = (dir: string, name: string) => `${dir}/${name}`
 
-/** The mention a prompt takes: quoted when the path holds a space. */
+/** The mention a prompt takes: quoted when the path holds any character outside the plain set. */
 export const mentionOf = (dir: string, name: string) => {
   const path = pathOf(dir, name)
 
-  return /\s/.test(path) ? `@"${path}" ` : `@${path} `
+  return /[^A-Za-z0-9._/+-]/.test(path) ? `@"${path}" ` : `@${path} `
 }

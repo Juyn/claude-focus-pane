@@ -3294,7 +3294,11 @@ const sessionName = async ($: EngineInterface) => {
 /** Inserts the file's mention in the prompt and marks it taken; a refused insertion only shows the path. */
 const takeDrop = async ($: EngineInterface, name: string) => {
   const seen = await read($, inboxView)
-  const filled = await $.prompt.fill({ text: mentionOf(seen.dir, name), mode: 'insert' }).catch(() => ({ isFilled: false }))
+  // Never glued to the word before it: a space first when the text before the cursor does not end with one.
+  const box = await $.prompt.read().catch(() => ({ text: '', cursor: 0 }))
+  const before = box.text.slice(0, box.cursor)
+  const lead = before !== '' && !/\s$/.test(before) ? ' ' : ''
+  const filled = await $.prompt.fill({ text: `${lead}${mentionOf(seen.dir, name)}`, mode: 'insert' }).catch(() => ({ isFilled: false }))
   if (!filled.isFilled) {
     $.ui.toast(`insertion impossible ici — ${pathOf(seen.dir, name)}`)
 

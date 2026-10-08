@@ -630,6 +630,8 @@ const copies: string[] = []
 let isCopyRefused = false
 /** The values written to the inboxView atom, in order. */
 const inboxWrites: unknown[] = []
+/** What $.prompt.read answers: the draft and the cursor; null makes the read fail. */
+let promptBox: { text: string; cursor: number } | null = null
 /** The toasts the plugin showed. */
 const toasts: string[] = []
 
@@ -640,6 +642,7 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
   sessionsPaneIs = 'shown'
   dropsPaneIs = 'gone'
   inboxWrites.length = 0
+  promptBox = null
   fills.length = 0
   copies.length = 0
   toasts.length = 0
@@ -649,6 +652,11 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
     if (e.key === 'inboxView') inboxWrites.push(e.value)
 
     return then(e)
+  })
+  on('prompt.read', () => {
+    if (promptBox === null) throw new Error('no prompt box')
+
+    return { value: promptBox }
   })
   on('prompt.fill', ($$, e) => {
     fills.push(e.text)
@@ -2203,6 +2211,25 @@ test('i inserts the mention at the cursor and marks the file taken for every ses
   const written_ = written.filter(one => one.path === TAKEN).at(-1)
   expect(JSON.parse(written_?.text ?? '{}')['rapport.pdf']).toMatchObject({ sessionId: 'session-test' })
   expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+})
+
+test('an insertion right after a word gets a space before it; after a space or in an empty box, none', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf'), entry('autre.pdf', 10, T0 - 40_000)])
+  promptBox = { text: 'regarde', cursor: 7 }
+  await (await band($)).press({ key: 'inbox:insert' })
+  expect(fills).toEqual([' @/home/test/inbox/rapport.pdf '])
+
+  promptBox = { text: 'regarde ', cursor: 8 }
+  await (await band($)).press({ key: 'inbox:insert' })
+  expect(fills.at(-1)).toBe('@/home/test/inbox/autre.pdf ')
+})
+
+test('an empty box, or one that cannot be read, gets no leading space', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  promptBox = { text: '', cursor: 0 }
+  await (await band($)).press({ key: 'inbox:insert' })
+
+  expect(fills).toEqual(['@/home/test/inbox/rapport.pdf '])
 })
 
 test('a file another session took leaves the band', async ($, on) => {
