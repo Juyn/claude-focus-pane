@@ -5777,27 +5777,31 @@ export const register: Register = on => {
     const row = (one: Drop, rank: number) => {
       const isLatest = rank < HIGHLIGHTED
       const who = Object.hasOwn(seen.taken, one.name) ? seen.taken[one.name] : undefined
-      const right = `${sizeOf(one.size)} · ${span(now - one.mtimeMs)}${who === undefined ? '' : ` · pris par ${who.name}`}`
+      const right = `${sizeOf(one.size)} · ${span(now - one.mtimeMs)}${who === undefined ? '' : ` · pris par ${cut(who.name, 16)}`}`
 
       return (
         <Box key={`drops:row:${rank}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
           <Text bold={isLatest} color={isLatest ? tone.mark : tone.text} backgroundColor={tone.panel} wrap="truncate-end">
             {cut(one.name, Math.max(8, room - right.length - 30))}
           </Text>
-          <Box flexDirection="row" columnGap={1} flexShrink={0}>
-            <Text {...quiet(tone, tone.panel)} wrap="truncate-end">{right}</Text>
-            <Button key={`drops:insert:${rank}`} plain label="insérer" onPress={() => takeDrop($, one.name)} />
-            <Button
-              key={`drops:copy:${rank}`}
-              plain
-              label="copier le chemin"
-              dimColor
-              onPress={async press => {
-                const path = pathOf(seen.dir, one.name)
-                const copied = await $.ui.copy({ text: path, surface: press.surface }).catch(() => ({ isCopied: false }))
-                $.ui.toast(copied.isCopied ? 'chemin copié' : `copie impossible ici — ${path}`)
-              }}
-            />
+          <Box flexDirection="row" columnGap={1} flexShrink={1}>
+            <Box flexShrink={1}>
+              <Text {...quiet(tone, tone.panel)} wrap="truncate-end">{right}</Text>
+            </Box>
+            <Box flexDirection="row" columnGap={1} flexShrink={0}>
+              <Button key={`drops:insert:${rank}`} plain label="insérer" onPress={() => takeDrop($, one.name)} />
+              <Button
+                key={`drops:copy:${rank}`}
+                plain
+                label="copier le chemin"
+                dimColor
+                onPress={async press => {
+                  const path = pathOf(seen.dir, one.name)
+                  const copied = await $.ui.copy({ text: path, surface: press.surface }).catch(() => ({ isCopied: false }))
+                  $.ui.toast(copied.isCopied ? 'chemin copié' : `copie impossible ici — ${path}`)
+                }}
+              />
+              </Box>
           </Box>
         </Box>
       )

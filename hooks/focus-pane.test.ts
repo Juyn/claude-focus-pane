@@ -2343,3 +2343,40 @@ test('the Drops tab draws on the desktop too', async ($, on) => {
 
   expect(dropRows(await (await dropsPane($, 'desktop')).drawn())).toHaveLength(7)
 })
+
+test('a narrow pane keeps both buttons: the taker name is cut and every text of the row truncates', async ($, on) => {
+  const clock = await start($, on)
+  const taker = 'abcdefghij'.repeat(4)
+  files.set(TAKEN, JSON.stringify({ [`${'x'.repeat(200)}.pdf`]: { sessionId: 'other', name: taker, at: T0 } }))
+  folders.set(INBOX, [entry(`${'x'.repeat(200)}.pdf`)])
+  await clock.advance(3_000)
+  await clock.advance(3_000)
+  const pane = await $.ui.mount({ plugin: 'focus-pane', surface: 'terminal', component: 'Pane', requestId: DROPS, props: { ...PROPS, bodyColumns: 30, placement: 'dock' as const } })
+  const row = await pane.find({ key: 'drops:row:0' })
+
+  expect(await pane.find({ key: 'drops:insert:0' })).toBeDefined()
+  expect(await pane.find({ key: 'drops:copy:0' })).toBeDefined()
+  expect(row?.text).toContain('pris par abcdefghij')
+  expect(row?.text).not.toContain(taker)
+  const texts: Drawn[] = []
+  const walk = (node: unknown) => {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return
+    if (one.type === 'Text') texts.push(one)
+    for (const child of one.children ?? []) walk(child)
+  }
+  const rowNode = (function find(node: unknown): unknown {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return undefined
+    if (one.props?.key === 'drops:row:0') return one
+    for (const child of one.children ?? []) {
+      const hit = find(child)
+      if (hit) return hit
+    }
+
+    return undefined
+  })(await pane.drawn())
+  walk(rowNode)
+  expect(texts.length).toBeGreaterThan(0)
+  expect(texts.every(one => one?.props?.wrap === 'truncate-end')).toBe(true)
+})
