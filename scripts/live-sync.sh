@@ -38,10 +38,23 @@ while :; do
   else
     rm -f "$cache/hosts/$remote.json.tmp"
   fi
-  # The inbox: new files only, never deleted there; with no -t, their date there is their arrival.
+  # The inbox: only files that held still for 10 s (never one still being written), never temp downloads,
+  # never empty; sent in the background under a lock, so a large upload never stalls the loop.
   if [ -d "$HOME/inbox" ]; then
-    rsync -rl --ignore-existing --partial-dir=.rsync-partial --exclude='.*' --timeout=30 \
-      -e "ssh ${ssh_opts[*]}" "$HOME/inbox/" "$remote:inbox/" >/dev/null 2>&1 || true
+    (
+      flock -n 9 || exit 0
+      touch -d "@$(( $(date +%s) - 10 ))" "$cache/inbox.ref"
+      if find "$HOME/inbox" -type f ! -path '*/.*' ! -name '*.part' ! -name '*.crdownload' ! -name '*.tmp' -size +0 \
+           ! -newer "$cache/inbox.ref" -printf '%P\0' 2>/dev/null \
+         | rsync -rl --from0 --files-from=- --ignore-existing --partial-dir=.rsync-partial --timeout=30 \
+             -e "ssh ${ssh_opts[*]}" "$HOME/inbox/" "$remote:inbox/" >/dev/null 2>"$cache/inbox-sync.err.new"; then
+        rm -f "$cache/inbox-sync.err" "$cache/inbox-sync.err.new"
+      else
+        # Said once in the journal, each time the error changes.
+        cmp -s "$cache/inbox-sync.err.new" "$cache/inbox-sync.err" 2>/dev/null || cat "$cache/inbox-sync.err.new" >&2
+        mv -f "$cache/inbox-sync.err.new" "$cache/inbox-sync.err"
+      fi
+    ) 9>"$cache/inbox.lock" &
   fi
   sleep "$interval"
 done
