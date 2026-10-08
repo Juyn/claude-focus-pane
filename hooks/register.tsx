@@ -10,7 +10,7 @@ import type {
   TurnUsage,
 } from 'claude-code'
 
-import type { AgentRow, AgentsView, Doc, Effort, Feature, FeedRow, Gallery, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
+import type { AgentRow, AgentsView, Doc, Effort, Feature, FeedRow, Gallery, MainLoop, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
 
@@ -54,6 +54,7 @@ const todos = atom({ plugin: 'focus-pane', key: 'todos' } as const, [])
 const feed = atom({ plugin: 'focus-pane', key: 'feed' } as const, [])
 const agents = atom({ plugin: 'focus-pane', key: 'agents' } as const, [])
 const agentsView = atom({ plugin: 'focus-pane', key: 'agentsView' } as const, { isFolded: false, isDoneHidden: false })
+const mainLoop = atom({ plugin: 'focus-pane', key: 'mainLoop' } as const, { model: null, effort: null })
 const usage = atom({ plugin: 'focus-pane', key: 'usage' } as const, {
   tokens: null,
   window: 0,
@@ -4281,7 +4282,19 @@ export const register: Register = on => {
 
   // Each request of a subagent's loop: its context, tokens and cost grow.
   on('turn.step', async function* ($, e, next) {
-    if (!e.agentId) return yield* next(e)
+    if (!e.agentId) {
+      const main = yield* next(e)
+      try {
+        const was = await read($, mainLoop)
+        const made = { model: main.usage?.model || e.model || was.model, effort: e.effort ?? was.effort }
+        // `update` writes whatever it is handed, and every write redraws: an unchanged loop is left alone.
+        if (made.model !== was.model || made.effort !== was.effort) await update($, mainLoop, () => made)
+      } catch {
+        // Noting the main loop never gets in a step's way.
+      }
+
+      return main
+    }
     const ran = yield* next(e)
     try {
       await noteStep($, e.agentId, e, ran.usage)
@@ -4557,6 +4570,7 @@ export const register: Register = on => {
     const plan: Todo[] = await read($, todos)
     const rows: FeedRow[] = await read($, feed)
     const crew: AgentRow[] = await read($, agents)
+    const main: MainLoop = await read($, mainLoop)
     const view: AgentsView = await read($, agentsView)
     const state: TurnState = await read($, turn)
     const spent: Usage = await read($, usage)
@@ -4798,7 +4812,7 @@ export const register: Register = on => {
         if (at === 0 || groupOf(shown[at - 1]!) !== groupOf(one)) margins += 1
       })
 
-      return 3 + (isEmpty ? 1 : 0) + titles + margins + body + (kept < lines.length ? 1 : 0)
+      return 3 + 1 + titles + margins + body + (kept < lines.length ? 1 : 0)
     }
     // ---- Who gives way first. The Sacred Book and the todos fold before the agents do:
     // 0. start at the floors (outlines and todos), every line folded;
@@ -5084,6 +5098,27 @@ export const register: Register = on => {
     const totals = hasCards ? `${dollars(sum(one => one.usd))} · ${compact(sum(one => one.tokens))} · ${clock(wall)}` : ''
     const foldLabel = view.isFolded ? 'déplier' : 'replier'
     const titleRoom = Math.max(8, inner - 'AGENTS ›'.length - 1 - (totals === '' ? 0 : totals.length + 1) - (isEmpty ? 0 : foldLabel.length + 1) - 2)
+    const mainTier = tierOf(main.effort)
+    const mainRight = [main.model === null ? '' : modelName(main.model), spent.percent === null ? '' : `${Math.round(spent.percent)}%`, turnClock ?? '']
+      .filter(one => one !== '')
+      .join(' · ')
+    const mainRow = (
+      <Box key="agents:main" flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
+        <Text backgroundColor={tone.card} wrap="truncate-end">
+          {state.isRunning ? (
+            <Text color={tone.bad} backgroundColor={tone.card}>●</Text>
+          ) : (
+            <Text {...quiet(tone, tone.card)}>○</Text>
+          )}
+          <Text bold color={tone.text} backgroundColor={tone.card}>{' Principal'}</Text>
+          {!state.isRunning && <Text {...quiet(tone, tone.card)}>{' · au repos'}</Text>}
+        </Text>
+        <Text backgroundColor={tone.card} wrap="truncate-end">
+          {mainTier !== null && <Text bold color={tone.tiers[mainTier]} backgroundColor={tone.card}>{mainTier}</Text>}
+          <Text {...quiet(tone, tone.card)}>{`${mainTier === null || mainRight === '' ? '' : ' · '}${mainRight}`}</Text>
+        </Text>
+      </Box>
+    )
     const agentsBlock = (
       <Box
         key="agents"
@@ -5113,7 +5148,7 @@ export const register: Register = on => {
             )}
           </Box>
         </Box>
-        {isEmpty && <Text {...quiet(tone, tone.card)}>aucun agent lancé</Text>}
+        {mainRow}
         {shownRunning.length > 0 && groupTitle(`En cours · ${runningL.length}`)}
         {lineNodes(shownRunning, 0)}
         {doneTitle}

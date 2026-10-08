@@ -782,13 +782,13 @@ const OPUS = 'claude-opus-5-5'
  * second from 66, the third from 70, all eight lines from 93). Above 52 the Sacred Book and the
  * todos have given way for them: that is the order, they fold before the agents do.
  */
-const VARIANT_B_ROWS = 70
+const VARIANT_B_ROWS = 71
 
 /**
  * The lowest docked height where the demo's five planned tasks unfold too, three rows and a rule
  * each: every line unfolded.
  */
-const VARIANT_A_ROWS = 93
+const VARIANT_A_ROWS = 94
 
 /** A subagent spawned by the model, then one model request of its loop. */
 const launch = async ($: Engine, description: string) => {
@@ -1091,7 +1091,9 @@ test('a step from an agent the engine does not list draws no row', async ($, on)
   const pane = await tallPane($)
 
   expect(await pane.find({ text: TOTALS })).toBeUndefined()
-  expect(await pane.find({ text: 'aucun agent lancé' })).toBeDefined()
+  expect(await pane.find({ key: 'agents:main' })).toBeDefined()
+  expect(await pane.find({ text: 'aucun agent lancé' })).toBeUndefined()
+  expect(await pane.find({ key: 'agent:ava:ghost' })).toBeUndefined()
 })
 
 test('a step from a listed agent nobody saw spawn makes its row', async ($, on) => {
@@ -1128,7 +1130,8 @@ test('no agent and no planned task says so, with no totals', async ($, on) => {
   engine(on)
   const pane = await tallPane($)
 
-  expect(await pane.find({ text: 'aucun agent lancé' })).toBeDefined()
+  expect(await pane.find({ key: 'agents:main' })).toBeDefined()
+  expect(await pane.find({ text: 'aucun agent lancé' })).toBeUndefined()
   expect(await pane.find({ text: TOTALS })).toBeUndefined()
   expect(await pane.find({ key: 'agents:fold' })).toBeUndefined()
   expect(await pane.find({ key: 'agents' })).toBeDefined()
@@ -1237,6 +1240,64 @@ test('a request of the main loop is none of the agents: nothing is listed, no ro
 
   expect(listed).toBe(0)
   expect(await (await tallPane($)).find({ text: TOTALS })).toBeUndefined()
+})
+
+/** One request of the main loop (no agentId), drained. */
+const mainStep = async ($: Engine, model: string, effort: 'xhigh' | 'high' | 'medium' | 'low' = 'high') => {
+  const stream = $.turn.step({ turnId: 'main', index: 0, model, effort, messageCount: 2 })
+  for await (const _chunk of stream) {
+    // Drained.
+  }
+
+  return stream.result
+}
+
+test('the main agent is always the first row of AGENTS, at rest with no subagent', async ($, on) => {
+  engine(on)
+  const pane = await tallPane($)
+  const main = await pane.find({ key: 'agents:main' })
+
+  expect(main).toBeDefined()
+  expect(main?.text).toContain('Principal')
+  expect(main?.text).toContain('au repos')
+  expect(await pane.find({ text: 'aucun agent lancé' })).toBeUndefined()
+  expect(await pane.find({ text: TOTALS })).toBeUndefined()
+  expect(await pane.find({ key: 'agents:fold' })).toBeUndefined()
+})
+
+test('the main row shows a turn running and the model and effort of the main loop', async ($, on) => {
+  engine(on)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  await $.turn.start({ text: 'go', turnId: 'main' })
+  await mainStep($, OPUS, 'high')
+  const main = await (await tallPane($)).find({ key: 'agents:main' })
+
+  expect(main?.text).toContain('●')
+  expect(main?.text).toContain('Principal')
+  expect(main?.text).toContain('careful')
+  expect(main?.text).toContain('Opus 5.5')
+  expect(main?.text).not.toContain('au repos')
+})
+
+test('a subagent step leaves the model of the main row alone', async ($, on) => {
+  engine(on)
+  await mainStep($, OPUS, 'high')
+  const id = await launch($, 'Petit')
+  await step($, id, { ...SMALL, model: 'claude-haiku-4-5' }, 'low')
+  const main = await (await tallPane($)).find({ key: 'agents:main' })
+
+  expect(main?.text).toContain('Opus 5.5')
+  expect(main?.text).not.toContain('Haiku')
+})
+
+test('the main row is drawn on the desktop surface too, with no avatar', async ($, on) => {
+  engine(on)
+  const pane = await tallPane($, 'desktop')
+  const main = await pane.find({ key: 'agents:main' })
+
+  expect(main?.text).toContain('Principal')
+  expect(main?.text).toContain('au repos')
+  expect(rasterKeys(await pane.drawn()).filter(key => key.startsWith('agent:ava:main'))).toHaveLength(0)
 })
 
 /** The demo in a docked pane of `columns` by `rows`: the bound feature, 8 todos, the default cat. */
@@ -1500,17 +1561,17 @@ test('folded, a line takes one row and no margin', async ($, on) => {
 // agent comes first, at the price of the outlines, the todos and the Sacred Book (from 53 rows);
 // the other agents come next, then the planned tasks, once the outlines and the todos are back.
 for (const [rows, unfolded] of [
-  [50, 0],
-  [52, 0],
-  [53, 1],
-  [65, 1],
-  [66, 2],
-  [69, 2],
+  [51, 0],
+  [53, 0],
+  [54, 1],
+  [66, 1],
+  [67, 2],
+  [70, 2],
   [VARIANT_B_ROWS, 3],
-  [81, 3],
-  [82, 4],
-  [84, 4],
-  [85, 5],
+  [82, 3],
+  [83, 4],
+  [85, 4],
+  [86, 5],
   [VARIANT_A_ROWS - 1, 7],
   [VARIANT_A_ROWS, 8],
 ] as const) {
@@ -1634,8 +1695,8 @@ const outlineRows = (tree: unknown) => textsOf(tree).filter(text => /^(▸ (?!Te
 /** The todo steps drawn in the TODOS block. */
 const todoRows = (tree: unknown) => textsOf(seek(tree, node => node.props?.key === 'plan')).filter(text => /^ [✓●○] ./.test(text))
 
-test('at 57 rows the demo unfolds the running agent: the outlines and the todos give way, the book stays whole', async ($, on) => {
-  const drawn = await (await demoDock($, on, 100, 57)).drawn()
+test('at 58 rows the demo unfolds the running agent: the outlines and the todos give way, the book stays whole', async ($, on) => {
+  const drawn = await (await demoDock($, on, 100, 58)).drawn()
   const avatars = rasterKeys(drawn).filter(key => key.startsWith('agent:ava:'))
 
   // The running agent, alone: its line is unfolded, its avatar drawn.
@@ -1650,11 +1711,11 @@ test('at 57 rows the demo unfolds the running agent: the outlines and the todos 
   expect(seek(drawn, node => node.props?.key === 'book:statuses')).toBeUndefined()
   expect(seek(drawn, node => node.props?.key === 'doc:spec')).toBeDefined()
   expect(seek(drawn, node => node.props?.key === 'doc:plan')).toBeDefined()
-  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 57 } })
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 58 } })
 })
 
 test('where the running agent does not fit with the whole book, the Sacred Book turns compact', async ($, on) => {
-  const pane = await demoDock($, on, 100, 53)
+  const pane = await demoDock($, on, 100, 54)
   const drawn = await pane.drawn()
   const book = seek(drawn, node => node.props?.key === 'book')
   const [frame, ...rest] = (book?.children ?? []) as Drawn[]
@@ -1676,7 +1737,7 @@ test('where the running agent does not fit with the whole book, the Sacred Book 
   // The mockup keeps its two buttons.
   expect(await pane.find({ key: 'gallery:open' })).toBeDefined()
   expect(await pane.find({ key: 'design:open' })).toBeDefined()
-  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 53 } })
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 54 } })
 })
 
 test('a bare pane with finished agents only unfolds the latest finished first, the todos giving way', async ($, on) => {
@@ -1690,19 +1751,19 @@ test('a bare pane with finished agents only unfolds the latest finished first, t
     })),
   })
   const ids = await crowd($, clock, 3, 0)
-  const drawn = await (await bareDock($, 48)).drawn()
+  const drawn = await (await bareDock($, 49)).drawn()
 
   expect(unfoldedOf(drawn, ids)).toEqual([ids[2]])
   // The todo list is cut to the step in hand to make that room.
   expect(todoRows(drawn)).toHaveLength(1)
   expect(textsOf(drawn)).toContain('   + 9 autres étapes')
-  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 48 } })
+  expect(drawn).toMatchObject({ type: 'Box', props: { minHeight: 49 } })
 })
 
 test('where the other agents stop unfolding midway, the outlines stay at their floor', async ($, on) => {
-  // 69 rows: the running agent and one finished one unfold, the third does not fit; the outlines
+  // 70 rows: the running agent and one finished one unfold, the third does not fit; the outlines
   // do not come back up with the rows that are left, they are the agents'.
-  const drawn = await (await demoDock($, on, 100, 69)).drawn()
+  const drawn = await (await demoDock($, on, 100, 70)).drawn()
 
   expect(rasterKeys(drawn).filter(key => key.startsWith('agent:ava:'))).toHaveLength(2)
   // OUTLINE_LEAST = 2 headings a paper, two papers side by side.
@@ -1711,8 +1772,8 @@ test('where the other agents stop unfolding midway, the outlines stay at their f
 })
 
 test('with the agents unfolded, the outlines and the todos come back before the planned tasks unfold', async ($, on) => {
-  // 75 rows: all three agents, more outlines than the floor, more todos than the floor, no planned avatar.
-  const drawn = await (await demoDock($, on, 100, 75)).drawn()
+  // 76 rows: all three agents, more outlines than the floor, more todos than the floor, no planned avatar.
+  const drawn = await (await demoDock($, on, 100, 76)).drawn()
 
   expect(rasterKeys(drawn).filter(key => key.startsWith('agent:ava:demo-'))).toHaveLength(3)
   expect(rasterKeys(drawn).filter(key => key.startsWith('agent:ava:todo-'))).toEqual([])
@@ -1732,15 +1793,15 @@ test('every running agent unfolds before the todos stop giving way; short of roo
   })
   const ids = await crowd($, clock, 0, 3)
 
-  // 56 rows: the three running agents, at the price of the todos cut to the step in hand.
-  const wide56 = await bareDock($, 56)
-  const all = await wide56.drawn()
+  // 57 rows: the three running agents, at the price of the todos cut to the step in hand.
+  const wide57 = await bareDock($, 57)
+  const all = await wide57.drawn()
   expect(unfoldedOf(all, ids)).toEqual(ids)
   expect(todoRows(all)).toHaveLength(1)
-  await wide56.unmount()
-  // 52 rows: the most degraded state holds two of them only, the latest started.
-  const two = await (await bareDock($, 52)).drawn()
+  await wide57.unmount()
+  // 53 rows: the most degraded state holds two of them only, the latest started.
+  const two = await (await bareDock($, 53)).drawn()
   expect(unfoldedOf(two, ids)).toEqual([ids[1], ids[2]])
   expect(todoRows(two)).toHaveLength(1)
-  expect(two).toMatchObject({ type: 'Box', props: { minHeight: 52 } })
+  expect(two).toMatchObject({ type: 'Box', props: { minHeight: 53 } })
 })

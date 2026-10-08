@@ -52,6 +52,9 @@ export type AgentRow = {
   usd: number
 }
 
+/** The session's own (main-loop) agent: the model and effort its last request reported. */
+export type MainLoop = { model: string | null; effort: Effort | null }
+
 /** How the AGENTS section is shown: rows folded to a line, the finished hidden. */
 export type AgentsView = {
   isFolded: boolean
@@ -136,6 +139,7 @@ declare module 'claude-code' {
       feed: FeedRow[]
       agents: AgentRow[]
       agentsView: AgentsView
+      mainLoop: MainLoop
       usage: Usage
       feature: Feature | null
       gallery: Gallery
