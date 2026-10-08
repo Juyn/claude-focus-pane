@@ -2298,6 +2298,35 @@ test('/inbox opens the Drops tab: newest first, the 5 latest set off', async ($,
   expect(rows.map(one => one.isBold)).toEqual([true, true, true, true, true, false, false])
 })
 
+/** The Texts of one `drops:row:<rank>`: the name first, then the details. */
+const rowTexts = (tree: unknown, rank: number) => {
+  const texts: Drawn[] = []
+  const walk = (node: unknown, inRow: boolean) => {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return
+    const isRow = one.props?.key === `drops:row:${rank}`
+    if (inRow && one.type === 'Text') texts.push(one)
+    for (const child of one.children ?? []) walk(child, inRow || isRow)
+  }
+  walk(tree, false)
+
+  return texts
+}
+
+test('the rows past the 5 newest draw their name quiet, like the details', async ($, on) => {
+  await inboxStart($, on, sevenDrops())
+  const tree = await (await dropsPane($)).drawn()
+  const quietOf = (one: Drawn) => ({ color: one?.props?.color, dimColor: one?.props?.dimColor, backgroundColor: one?.props?.backgroundColor, bold: one?.props?.bold })
+
+  const latest = rowTexts(tree, 0)
+  expect(quietOf(latest[0] ?? null).color).not.toBe(quietOf(latest[1] ?? null).color)
+  for (const rank of [5, 6]) {
+    const texts = rowTexts(tree, rank)
+    expect(quietOf(texts[0] ?? null)).toEqual({ ...quietOf(texts[1] ?? null), bold: undefined })
+    expect(texts[0]?.props?.wrap).toBe('truncate-end')
+  }
+})
+
 test('a row says name, size, age, and who took it', async ($, on) => {
   const clock = await start($, on)
   files.set(TAKEN, JSON.stringify({ 'f0.pdf': { sessionId: 'other', name: 'Paiements', at: T0 } }))

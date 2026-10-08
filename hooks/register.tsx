@@ -5783,7 +5783,10 @@ export const register: Register = on => {
 
       return (
         <Box key={`drops:row:${rank}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
-          <Text bold={isLatest} color={isLatest ? tone.mark : tone.text} backgroundColor={tone.panel} wrap="truncate-end">
+          <Text
+            {...(isLatest ? { bold: true, color: tone.mark, backgroundColor: tone.panel } : quiet(tone, tone.panel))}
+            wrap="truncate-end"
+          >
             {cut(one.name, Math.max(8, room - right.length - 30))}
           </Text>
           <Box flexDirection="row" columnGap={1} flexShrink={1}>
