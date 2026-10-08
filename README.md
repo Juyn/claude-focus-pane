@@ -122,8 +122,23 @@ machine that can reach the other (here, the PC reaching the server's alias `fact
 
     ~/.claude/mods/focus-pane/install.sh --sync factory
 
-It installs and starts the user service `focus-pane-sync.service`. The other machine needs this repo at
-`~/.claude/mods/focus-pane` (kept up to date with `git pull`) and `python3`; nothing to install there.
+It installs and (re)starts the user service `focus-pane-sync.service`; run it again after adding an alias
+or pulling a fix of `live-sync.sh`.
+
+The other machine must load the mod too: this repo at `~/.claude/mods/focus-pane` (kept up to date with
+`git pull`), its own `install.sh` run there without `--sync`, and `python3`. Without it, its sessions
+publish no heartbeats and it shows no Sessions tab.
+
+The service runs with `BatchMode`, so it never asks for a passphrase: it needs an SSH key the systemd
+user service can use, either a key without passphrase, or an agent whose `SSH_AUTH_SOCK` the user
+manager sees (for example `systemctl --user import-environment SSH_AUTH_SOCK`, then restart the service).
+
+Diagnose with:
+
+    journalctl --user -u focus-pane-sync -f
+
+Uninstall with `systemctl --user disable --now focus-pane-sync.service`, then remove
+`~/.config/systemd/user/focus-pane-sync.service`.
 
 A branch that carries a ticket known to a Sacred Book README binds its feature at session start.
 A binding made with `spec` is remembered per checkout and restored at the next session there; outside
