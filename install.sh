@@ -70,6 +70,18 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 UNIT
+  # The inbox: the folder files are dropped in, and two Nautilus bookmarks (here, and there over sftp).
+  mkdir -p "$HOME/inbox"
+  bookmarks="${XDG_CONFIG_HOME:-$HOME/.config}/gtk-3.0/bookmarks"
+  mkdir -p "$(dirname "$bookmarks")"
+  touch "$bookmarks"
+  grep -q "^file://$HOME/inbox " "$bookmarks" || printf 'file://%s/inbox Vers VPS\n' "$HOME" >> "$bookmarks"
+  remote_home=$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o ForwardAgent=no "$sync_alias" 'printf %s "$HOME"' 2>/dev/null || true)
+  if [ -n "$remote_home" ]; then
+    grep -q "^sftp://$sync_alias$remote_home/inbox " "$bookmarks" || printf 'sftp://%s%s/inbox Inbox VPS\n' "$sync_alias" "$remote_home" >> "$bookmarks"
+  else
+    echo "note: $sync_alias unreachable, the sftp bookmark was not added (run install.sh --sync again later)"
+  fi
   systemctl --user daemon-reload
   systemctl --user enable focus-pane-sync.service
   systemctl --user restart focus-pane-sync.service

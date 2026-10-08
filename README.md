@@ -111,6 +111,7 @@ file of this repo or into `settings.json`; export it from the shell profile.
 | `/mission pet sprite` / `3d` / `line` / `pixel` / `off` | the cat at the bottom of the pane: the sprite sheet (12 rows, default), ray-marched 3D (10 rows), line art (9 rows), flat pixels (3 rows), or sent in |
 | `/mission demo` | fills the whole pane with demonstration data — mission, feature (the bound one, else a made-up one), todos, activity — to see it full |
 | `/mission sessions` (or `s` in the pane) | the Sessions tab: what is running or waiting, on this machine and on the one the sync reflects, including subagents |
+| `/inbox` (ou `d` dans le pane) | l'onglet Drops : les fichiers reçus dans ~/inbox, à insérer ou copier |
 
 With the keyboard in the pane (click it, or `ctrl+x tab`): `m` mockup thumbnails, `o` open the mockup, `esc` back to the prompt.
 
@@ -139,6 +140,15 @@ Diagnose with:
 
 Uninstall with `systemctl --user disable --now focus-pane-sync.service`, then remove
 `~/.config/systemd/user/focus-pane-sync.service`.
+
+### Dropping files to the server
+
+Drop any file in `~/inbox` on the PC (bookmarked in Nautilus as "Vers VPS"): the sync sends new files to
+`~/inbox` on the server every few seconds — never deleting there, and a file already there is never sent
+again (rename it to send a new version). In every session, a band above the prompt offers the newest file:
+`i` inserts its path in the prompt, `x` sets it aside. `/inbox` (or `d` in the pane) opens the Drops tab: the
+20 latest files, the 5 newest set off, each with "insérer" and "copier le chemin". The "Inbox VPS" bookmark
+browses the server's inbox over sftp.
 
 A branch that carries a ticket known to a Sacred Book README binds its feature at session start.
 A binding made with `spec` is remembered per checkout and restored at the next session there; outside

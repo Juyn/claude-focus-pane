@@ -12,8 +12,9 @@ interval="${4:-3}"
 here="$(cd "$(dirname "$0")" && pwd)"
 cache="$HOME/.cache/focus-pane"
 local_host="$(hostname)"
-ssh_cmd=(ssh -o BatchMode=yes -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ConnectTimeout=5 -o ControlMaster=auto -o ControlPersist=60
-  -o "ControlPath=$cache/ssh-%C" -o ServerAliveInterval=5 -o ServerAliveCountMax=2 "$remote")
+ssh_opts=(-o BatchMode=yes -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o ConnectTimeout=5
+  -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$cache/ssh-%C" -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+ssh_cmd=(ssh "${ssh_opts[@]}" "$remote")
 
 mkdir -p "$cache/hosts" "$cache/live"
 printf '%s\n' "$local_label" > "$cache/label"
@@ -36,6 +37,11 @@ while :; do
     mv "$cache/hosts/$remote.json.tmp" "$cache/hosts/$remote.json"
   else
     rm -f "$cache/hosts/$remote.json.tmp"
+  fi
+  # The inbox: new files only, never deleted there; with no -t, their date there is their arrival.
+  if [ -d "$HOME/inbox" ]; then
+    rsync -rl --ignore-existing --partial-dir=.rsync-partial --exclude='.*' --timeout=30 \
+      -e "ssh ${ssh_opts[*]}" "$HOME/inbox/" "$remote:inbox/" >/dev/null 2>&1 || true
   fi
   sleep "$interval"
 done
