@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { ConfigRow, On, TurnUsage } from 'claude-code'
+import type { ConfigRow, FsEntry, On, TurnUsage } from 'claude-code'
+import type { Heartbeat } from '../types'
 
 const PANE = 'focus'
 
@@ -17,10 +18,32 @@ const PROPS = {
 const stepped = new Map<string, TurnUsage>()
 let spawned = 0
 
+/** What the plugin wrote with $.fs.write, in order. */
+const written: { path: string; text: string }[] = []
+/** What $.fs.read answers, by path, and what $.fs.list answers, by directory. */
+const files = new Map<string, string>()
+const folders = new Map<string, FsEntry[]>()
+/** What $.env.get answers for HOME: a test unsets it to play a session with no home. */
+let home: string | undefined
+
 /** The engine beneath the plugin: the test answers for it. */
 const engine = (on: On, theme = 'dark') => {
   stepped.clear()
   spawned = 0
+  written.length = 0
+  files.clear()
+  folders.clear()
+  home = '/home/test'
+  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? home : undefined }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('session.id', () => ({ value: 'session-test' }))
+  on('fs.write', (_$, e) => {
+    written.push({ path: e.path, text: e.text })
+
+    return { value: undefined }
+  })
+  on('fs.read', (_$, e) => ({ value: files.get(e.path) ?? '' }))
+  on('fs.list', (_$, e) => ({ value: folders.get(e.path) ?? [] }))
   const clock = mock.clock(on, { now: 1_700_000_000_000 })
   on('agent.spawn', () => {
     spawned += 1
@@ -1267,7 +1290,6 @@ test('the main agent is always the first row of AGENTS, at rest with no subagent
 
 test('the main row shows a turn running and the model and effort of the main loop', async ($, on) => {
   engine(on)
-  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   await $.turn.start({ text: 'go', turnId: 'main' })
   await mainStep($, OPUS, 'high')
   const main = await (await tallPane($)).find({ key: 'agents:main' })
@@ -1298,6 +1320,54 @@ test('the main row is drawn on the desktop surface too, with no avatar', async (
   expect(main?.text).toContain('Principal')
   expect(main?.text).toContain('au repos')
   expect(rasterKeys(await pane.drawn()).filter(key => key.startsWith('agent:ava:main'))).toHaveLength(0)
+})
+
+const BEAT = '/home/test/.cache/focus-pane/live/session-test.json'
+const beats = () => written.filter(one => one.path === BEAT).map(one => JSON.parse(one.text) as Heartbeat)
+
+test('the session publishes its heartbeat at start, then at each real change only', async ($, on) => {
+  await start($, on)
+  expect(beats()).toHaveLength(1)
+  expect(beats()[0]).toMatchObject({ v: 1, sessionId: 'session-test', agents: [], main: { isRunning: false } })
+
+  const id = await launch($, 'Chercheur')
+  expect(beats()).toHaveLength(2)
+  expect(beats()[1]?.agents).toMatchObject([{ id, title: 'Chercheur' }])
+
+  // The first step tells the agent's effort and model; a second, alike, only makes its context grow.
+  await step($, id, SMALL)
+  const told = beats().length
+  await step($, id, SMALL)
+  expect(beats()).toHaveLength(told)
+
+  await finish($, id, 'answer')
+  expect(beats()).toHaveLength(told + 1)
+  expect(beats().at(-1)?.agents).toEqual([])
+})
+
+test('the heartbeat is written again every 15 s, changed or not', async ($, on) => {
+  const clock = await start($, on)
+  await clock.advance(15_000)
+
+  expect(beats()).toHaveLength(2)
+})
+
+test('the main loop and its turn reach the heartbeat', async ($, on) => {
+  await start($, on)
+  await $.turn.start({ text: 'go', turnId: 'main' })
+  await mainStep($, OPUS, 'high')
+
+  expect(beats().at(-1)?.main).toEqual({ model: OPUS, effort: 'high', isRunning: true })
+})
+
+test('with no HOME nothing is written, and a subagent still starts', async ($, on) => {
+  await start($, on)
+  home = undefined
+  written.length = 0
+  const id = await launch($, 'Sans maison')
+
+  expect(id).not.toBe('')
+  expect(beats()).toHaveLength(0)
 })
 
 /** The demo in a docked pane of `columns` by `rows`: the bound feature, 8 todos, the default cat. */

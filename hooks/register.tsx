@@ -10,6 +10,7 @@ import type {
   TurnUsage,
 } from 'claude-code'
 
+import { contentOf, heartbeatOf } from './sessions'
 import type { AgentRow, AgentsView, Doc, Effort, Feature, FeedRow, Gallery, MainLoop, PetCoat, PetStyle, Focus, Skin, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
@@ -3225,6 +3226,22 @@ const strangers = new Set<string>()
 /** Redraws each second while an agent runs: a module value, so a reload drops it with its timer. */
 let agentTicker: Timer | undefined
 
+/** The heartbeat's content last written, and the timer keeping it fresh: module values, a reload writes anew. */
+let beatWritten = ''
+let beatTimer: Timer | undefined
+
+/** Publishes this session's heartbeat when what it says changed, or always when `isForced`. */
+const publishBeat = async ($: EngineInterface, isForced = false) => {
+  const home = await $.env.get('HOME')
+  if (!home) return
+  const id = await $.session.id()
+  const beat = heartbeatOf(id, await $.clock.now(), await read($, mainLoop), (await read($, turn)).isRunning, await read($, agents))
+  const content = contentOf(beat)
+  if (!isForced && content === beatWritten) return
+  beatWritten = content
+  await $.fs.write(`${home}/.cache/focus-pane/live/${id}.json`, JSON.stringify(beat))
+}
+
 /** Starts or stops the ticker after each write of the rows. */
 const tick = async ($: EngineInterface) => {
   try {
@@ -3273,6 +3290,7 @@ const noteStep = async (
     ),
   )
   await tick($)
+  await publishBeat($).catch(() => undefined)
 }
 
 /** A subagent's turn ended: its row closes, and takes the turn's usage if no step ever gave it one. */
@@ -3290,6 +3308,7 @@ const endAgent = async ($: EngineInterface, id: string, reason: string, usage: T
     ),
   )
   await tick($)
+  await publishBeat($).catch(() => undefined)
 }
 
 /** The engine's own list is the truth: a row still running whose agent is over is closed. */
@@ -3306,6 +3325,7 @@ const reconcileAgents = async ($: EngineInterface) => {
     }),
   )
   await tick($)
+  await publishBeat($).catch(() => undefined)
 }
 
 /** Task ids as a tool call spells them. */
@@ -4040,6 +4060,16 @@ export const register: Register = on => {
     pace($, (await read($, turn)).isRunning)
     // The rows outlive a reload, the timer does not.
     await tick($).catch(() => undefined)
+    // The heartbeat: written now, then every 15 s as a sign of life; a reload drops the old timer.
+    await publishBeat($, true).catch(() => undefined)
+    try {
+      beatTimer?.cancel()
+    } catch {
+      // A timer of an engine long gone.
+    }
+    beatTimer = $.clock.every(15_000, () => {
+      void publishBeat($, true).catch(() => undefined)
+    })
 
     const branch = await $.process
       .run(['git', 'branch', '--show-current'], { cwd: await $.session.cwd() })
@@ -4240,6 +4270,7 @@ export const register: Register = on => {
     await claimCommand($).catch(() => undefined)
     const now = await $.clock.now()
     await update($, turn, was => ({ ...was, isRunning: true, startedAt: now }))
+    await publishBeat($).catch(() => undefined)
     await meterUsage($).catch(() => undefined)
 
     const seated = await read($, focus)
@@ -4272,6 +4303,7 @@ export const register: Register = on => {
             : trimAgents([...was, blankAgent(id, title, e.subagentType, started.model, now)]),
         )
         await tick($)
+        await publishBeat($).catch(() => undefined)
       }
     } catch {
       // Tracking an agent never gets in the spawn's way.
@@ -4289,6 +4321,7 @@ export const register: Register = on => {
         const made = { model: main.usage?.model || e.model || was.model, effort: e.effort ?? was.effort }
         // `update` writes whatever it is handed, and every write redraws: an unchanged loop is left alone.
         if (made.model !== was.model || made.effort !== was.effort) await update($, mainLoop, () => made)
+        await publishBeat($)
       } catch {
         // Noting the main loop never gets in a step's way.
       }
@@ -4461,6 +4494,7 @@ export const register: Register = on => {
       startedAt: null,
       lastMs: e.durationMs,
     }))
+    await publishBeat($).catch(() => undefined)
     // A call the turn left open was cut short with it.
     await update($, feed, was =>
       was.map(one => (one.ms === null ? { ...one, ms: 0, isError: e.isAborted } : one)),
