@@ -10,13 +10,20 @@ export const BAND_MS = 10 * 60_000
 type Listed = { name: string; size: number; mtimeMs: number }
 
 /** The files that held still between two reads (same size, same date), hidden ones out; newest first. */
-export const stableDrops = (before: readonly Listed[], after: readonly Listed[]): Drop[] =>
-  after
+export const stableDrops = (before: readonly Listed[], after: readonly Listed[]): Drop[] => {
+  const was = new Map(before.map(one => [one.name, one]))
+
+  return after
     .filter(one => !one.name.startsWith('.'))
-    .filter(one => before.some(was => was.name === one.name && was.size === one.size && was.mtimeMs === one.mtimeMs))
+    .filter(one => {
+      const old = was.get(one.name)
+
+      return old !== undefined && old.size === one.size && old.mtimeMs === one.mtimeMs
+    })
     .sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))
     .slice(0, INBOX_KEPT)
     .map(one => ({ name: one.name, size: one.size, mtimeMs: one.mtimeMs }))
+}
 
 const isTaken = (one: unknown): one is Taken => {
   const taken = one as Partial<Taken> | null
