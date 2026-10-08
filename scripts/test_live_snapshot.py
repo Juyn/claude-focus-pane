@@ -118,6 +118,11 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(printed['label'], 'VPS')
         self.assertEqual([one['sessionId'] for one in printed['sessions']], ['s10'])
 
+    def test_an_undecodable_label_file_falls_back_to_the_hostname(self):
+        with open(os.path.join(self.home, '.cache', 'focus-pane', 'label'), 'wb') as held:
+            held.write(b'\xff\xfe')
+        self.assertEqual(snap.label_of(self.home, ''), socket.gethostname())
+
 
 if __name__ == '__main__':
     unittest.main()

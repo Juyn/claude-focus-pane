@@ -107,7 +107,7 @@ def label_of(home, asked):
             said = held.read().strip()
         if said:
             return said
-    except OSError:
+    except (OSError, ValueError):
         pass
     return socket.gethostname()
 
