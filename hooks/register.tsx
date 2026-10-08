@@ -3383,10 +3383,8 @@ const stopSessions = () => {
 /** The name /inbox answered to at session start, null when another plugin held it. */
 let inboxCommand: string | null = null
 
-/** Opens the Drops tab, read once at once (the 3 s inbox timer keeps it fresh). */
-const openDrops = async ($: EngineInterface) => {
-  await readInbox($).catch(() => undefined)
-
+/** Opens the Drops tab; the atom is already fresh from the 3 s inbox timer (an extra read would skip the two-read rule). */
+const openDrops = ($: EngineInterface) => {
   return $.ui.open({ id: DROPS, title: 'Drops', focus: true })
 }
 

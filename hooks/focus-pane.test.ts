@@ -2241,6 +2241,16 @@ test('a second session.start (a hot reload) keeps the band instead of blanking i
   expect((await (await band($)).find({ key: 'inbox:band' }))?.text).toContain('rapport.pdf')
 })
 
+test('opening the Drops tab is no extra read: a file seen once is not stable yet', async ($, on) => {
+  const clock = await start($, on)
+  folders.set(INBOX, [entry('rapport.pdf')])
+  await clock.advance(3_000)
+  await $.command.run({ command: 'inbox', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+
+  expect(opened).toContain('drops')
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+})
+
 test('a file another session took leaves the band', async ($, on) => {
   const clock = await start($, on)
   files.set(TAKEN, JSON.stringify({ 'rapport.pdf': { sessionId: 'other', name: 'Paiements', at: T0 } }))
