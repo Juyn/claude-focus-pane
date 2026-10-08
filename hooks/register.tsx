@@ -3304,16 +3304,16 @@ const takeDrop = async ($: EngineInterface, name: string) => {
 
     return
   }
+  const mine: Taken = { sessionId: await $.session.id().catch(() => ''), name: await sessionName($), at: await $.clock.now() }
+  // The atom first, so a tick racing this write cannot bring the band back; then the file is read again, just before it is written.
+  await update($, inboxView, was => ({ ...was, taken: { ...was.taken, [name]: mine } }))
   const home = await $.env.get('HOME')
   if (!home) return
   const file = `${home}/.cache/focus-pane/inbox-taken.json`
   const text = await $.fs.read(file).catch(() => '')
-  const taken: Record<string, Taken> = {
-    ...parseTaken(typeof text === 'string' ? text : ''),
-    [name]: { sessionId: await $.session.id().catch(() => ''), name: await sessionName($), at: await $.clock.now() },
-  }
+  const taken: Record<string, Taken> = { ...parseTaken(typeof text === 'string' ? text : ''), [name]: mine }
   await $.fs.write(file, JSON.stringify(taken)).catch(() => undefined)
-  await update($, inboxView, was => ({ ...was, taken }))
+  await update($, inboxView, was => ({ ...was, taken: { ...was.taken, ...taken } }))
 }
 
 /** Sets the file aside in this session's band only. */

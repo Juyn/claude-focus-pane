@@ -630,6 +630,8 @@ const copies: string[] = []
 let isCopyRefused = false
 /** The values written to the inboxView atom, in order. */
 const inboxWrites: unknown[] = []
+/** For each write of the inboxView atom that holds a taken file: how many inbox-taken.json writes came before it. */
+const takenAtomSeenAfterFileWrites: number[] = []
 /** What $.prompt.read answers: the draft and the cursor; null makes the read fail. */
 let promptBox: { text: string; cursor: number } | null = null
 /** The toasts the plugin showed. */
@@ -642,6 +644,7 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
   sessionsPaneIs = 'shown'
   dropsPaneIs = 'gone'
   inboxWrites.length = 0
+  takenAtomSeenAfterFileWrites.length = 0
   promptBox = null
   fills.length = 0
   copies.length = 0
@@ -649,7 +652,11 @@ const start = async ($: Engine, on: On, run: (argv: readonly string[]) => Ran = 
   isFillRefused = false
   isCopyRefused = false
   on('state.set', ($$, e, then) => {
-    if (e.key === 'inboxView') inboxWrites.push(e.value)
+    if (e.key === 'inboxView') {
+      inboxWrites.push(e.value)
+      const wrote = Object.keys((e.value as { taken: Record<string, unknown> }).taken)
+      if (wrote.length > 0) takenAtomSeenAfterFileWrites.push(written.filter(one => one.path === TAKEN).length)
+    }
 
     return then(e)
   })
@@ -2249,6 +2256,17 @@ test('opening the Drops tab is no extra read: a file seen once is not stable yet
 
   expect(opened).toContain('drops')
   expect(await (await band($)).find({ key: 'inbox:band' })).toBeUndefined()
+})
+
+test('taking a file: the atom hears of it before the file is written, and another session\'s entry written meanwhile is kept', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  takenAtomSeenAfterFileWrites.length = 0
+  files.set(TAKEN, JSON.stringify({ 'autre.pdf': { sessionId: 'other', name: 'Paiements', at: T0 } }))
+  await (await band($)).press({ key: 'inbox:insert' })
+
+  expect(takenAtomSeenAfterFileWrites[0]).toBe(0)
+  const final = JSON.parse(written.filter(one => one.path === TAKEN).at(-1)?.text ?? '{}')
+  expect(Object.keys(final).sort()).toEqual(['autre.pdf', 'rapport.pdf'])
 })
 
 test('a file another session took leaves the band', async ($, on) => {
