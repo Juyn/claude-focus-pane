@@ -12,7 +12,7 @@ import type {
 
 import { blocksOf, contentOf, heartbeatOf, parseSnapshot, projectOf, titleOf } from './sessions'
 import type { HostBlock } from './sessions'
-import { bandDrops, mentionOf, parseTaken, pathOf, sizeOf, stableDrops } from './inbox'
+import { HIGHLIGHTED, bandDrops, mentionOf, parseTaken, pathOf, sizeOf, stableDrops } from './inbox'
 import type { AgentRow, AgentsView, BeatAgent, Doc, Drop, Effort, Feature, FeedRow, Gallery, InboxView, LiveSession, MainLoop, PetCoat, PetStyle, Focus, SessionsView, Skin, Snapshot, Taken, Todo, TurnState, Usage } from '../types'
 
 const PANE = 'focus'
@@ -22,6 +22,9 @@ const GALLERY = 'maquettes'
 
 /** The third pane: what works or waits now, on this machine and on the ones the sync mirrors. */
 const SESSIONS = 'sessions'
+
+/** The fourth pane: the latest files of the inbox, to insert or copy. */
+const DROPS = 'drops'
 
 /** A thumbnail's height in pixels: two a terminal row. */
 const THUMB_PIXELS = 34
@@ -3371,6 +3374,16 @@ const stopSessions = () => {
   sessionsTimer = undefined
 }
 
+/** The name /inbox answered to at session start, null when another plugin held it. */
+let inboxCommand: string | null = null
+
+/** Opens the Drops tab, read once at once (the 3 s inbox timer keeps it fresh). */
+const openDrops = async ($: EngineInterface) => {
+  await readInbox($).catch(() => undefined)
+
+  return $.ui.open({ id: DROPS, title: 'Drops', focus: true })
+}
+
 /** Opens the Sessions tab, read once at once, then every 3 s. */
 const openSessions = async ($: EngineInterface) => {
   await readSessions($).catch(() => undefined)
@@ -4220,6 +4233,11 @@ export const register: Register = on => {
     inboxTimer = $.clock.every(3_000, () => {
       void readInbox($).catch(() => undefined)
     })
+    // /inbox opens the Drops tab; a name taken by another plugin leaves it to /mission drops.
+    inboxCommand = await $.command
+      .register({ name: 'inbox', description: "L'onglet Drops : les fichiers reçus dans ~/inbox, à insérer ou copier" })
+      .then(() => 'inbox')
+      .catch(() => null)
 
     const branch = await $.process
       .run(['git', 'branch', '--show-current'], { cwd: await $.session.cwd() })
@@ -4250,6 +4268,13 @@ export const register: Register = on => {
     await update($, skin, () => skinOf(e.value))
 
     return set
+  })
+
+  on('command.run', { command: 'inbox' }, async ($, e, then) => {
+    if (inboxCommand !== 'inbox') return then(e)
+    const opened_ = await openDrops($)
+
+    return { text: opened_.isPlaced ? 'Focus pane: onglet Drops ouvert.' : "Focus pane: élargis le terminal pour l'onglet Drops." }
   })
 
   on('command.run', async ($, e, next) => {
@@ -4349,6 +4374,12 @@ export const register: Register = on => {
       const opened = await openSessions($)
 
       return { text: opened.isPlaced ? 'Focus pane: onglet Sessions ouvert.' : "Focus pane: élargis le terminal pour l'onglet Sessions." }
+    }
+
+    if (args === 'drops') {
+      const opened_ = await openDrops($)
+
+      return { text: opened_.isPlaced ? 'Focus pane: onglet Drops ouvert.' : "Focus pane: élargis le terminal pour l'onglet Drops." }
     }
 
     const isMission = args.startsWith('mission ')
@@ -4725,7 +4756,7 @@ export const register: Register = on => {
   })
 
   on('ui.press', async ($, e, next) => {
-    if (e.requestId !== PANE && e.requestId !== GALLERY && e.requestId !== SESSIONS) return next(e)
+    if (e.requestId !== PANE && e.requestId !== GALLERY && e.requestId !== SESSIONS && e.requestId !== DROPS) return next(e)
     const [kind, verb] = e.element.split(':')
 
     if (kind === 'bao' && verb === 'plant') {
@@ -4738,6 +4769,10 @@ export const register: Register = on => {
     } else if (kind === 'sessions' && verb === 'open') {
       await openSessions($).catch(() => undefined)
     } else if (kind === 'sessions' && verb === 'back') {
+      await $.ui.open({ id: PANE, title: 'Focus', focus: true }).catch(() => undefined)
+    } else if (kind === 'drops' && verb === 'open') {
+      await openDrops($).catch(() => undefined)
+    } else if (kind === 'drops' && verb === 'back') {
       await $.ui.open({ id: PANE, title: 'Focus', focus: true }).catch(() => undefined)
     } else if (kind === 'agents' && verb === 'fold') {
       await update($, agentsView, was => ({ ...was, isFolded: !was.isFolded }))
@@ -5297,7 +5332,7 @@ export const register: Register = on => {
     // in hand gives way to them, never the other way round.
     const totals = hasCards ? `${dollars(sum(one => one.usd))} · ${compact(sum(one => one.tokens))} · ${clock(wall)}` : ''
     const foldLabel = view.isFolded ? 'déplier' : 'replier'
-    const titleRoom = Math.max(8, inner - 'AGENTS ›'.length - 1 - (totals === '' ? 0 : totals.length + 1) - (isEmpty ? 0 : foldLabel.length + 1) - ('sessions'.length + 1) - 2)
+    const titleRoom = Math.max(8, inner - 'AGENTS ›'.length - 1 - (totals === '' ? 0 : totals.length + 1) - (isEmpty ? 0 : foldLabel.length + 1) - ('sessions'.length + 1) - ('drops'.length + 1) - 2)
     const mainTier = tierOf(main.effort)
     const mainRight = [main.model === null ? '' : modelName(main.model), spent.percent === null ? '' : `${Math.round(spent.percent)}%`, turnClock ?? '']
       .filter(one => one !== '')
@@ -5347,6 +5382,7 @@ export const register: Register = on => {
               <Button key="agents:fold" plain hotkey="r" label={foldLabel} dimColor onPress={() => undefined} />
             )}
             <Button key="sessions:open" plain hotkey="s" label="sessions" dimColor onPress={() => undefined} />
+            <Button key="drops:open" plain hotkey="d" label="drops" dimColor onPress={() => undefined} />
           </Box>
         </Box>
         {mainRow}
@@ -5474,6 +5510,7 @@ export const register: Register = on => {
       ...(isBao ? ([['b', 'Bambou']] as const) : []),
       ...(isEmpty ? [] : ([['r', 'Replier']] as const)),
       ['s', 'Sessions'],
+      ['d', 'Drops'],
       ['ctrl+x tab', 'Clavier'],
       ['esc', 'Rendre la main'],
       ...(mine === null ? [] : ([[`/${mine}`, 'Rouvrir']] as const)),
@@ -5717,6 +5754,65 @@ export const register: Register = on => {
         {seen.readAt !== null && seen.others.length === 0 && (
           <Text {...quiet(tone, tone.panel)}>autre machine jamais synchronisée (install.sh --sync &lt;alias&gt;)</Text>
         )}
+        <Box flexGrow={1} />
+        {legend(parts, tone, [
+          ['b', 'Retour au focus'],
+          ['ctrl+x tab', 'Clavier'],
+          ['esc', 'Rendre la main'],
+        ])}
+      </Box>
+    )
+  })
+
+  // The Drops tab: the latest files of the inbox, the 5 newest set off; insert or copy their path.
+  on('ui.render', { component: 'Pane', requestId: DROPS }, async ($, e) => {
+    const table = $.ui.resolve(e)
+    const { Box, Text, Button } = table
+    const tone = TONES[await read($, skin)]
+    const parts: Elements = { Box, Text, Svg: e.surface !== 'terminal' && 'Svg' in table ? table.Svg : undefined }
+    const room = Math.max(24, e.props.bodyColumns) - 2
+    const seen: InboxView = await read($, inboxView)
+    const now = await $.clock.now()
+
+    const row = (one: Drop, rank: number) => {
+      const isLatest = rank < HIGHLIGHTED
+      const who = Object.hasOwn(seen.taken, one.name) ? seen.taken[one.name] : undefined
+      const right = `${sizeOf(one.size)} · ${span(now - one.mtimeMs)}${who === undefined ? '' : ` · pris par ${who.name}`}`
+
+      return (
+        <Box key={`drops:row:${rank}`} flexDirection="row" width="100%" justifyContent="space-between" columnGap={1}>
+          <Text bold={isLatest} color={isLatest ? tone.mark : tone.text} backgroundColor={tone.panel} wrap="truncate-end">
+            {cut(one.name, Math.max(8, room - right.length - 30))}
+          </Text>
+          <Box flexDirection="row" columnGap={1} flexShrink={0}>
+            <Text {...quiet(tone, tone.panel)} wrap="truncate-end">{right}</Text>
+            <Button key={`drops:insert:${rank}`} plain label="insérer" onPress={() => takeDrop($, one.name)} />
+            <Button
+              key={`drops:copy:${rank}`}
+              plain
+              label="copier le chemin"
+              dimColor
+              onPress={async press => {
+                const path = pathOf(seen.dir, one.name)
+                const copied = await $.ui.copy({ text: path, surface: press.surface }).catch(() => ({ isCopied: false }))
+                $.ui.toast(copied.isCopied ? 'chemin copié' : `copie impossible ici — ${path}`)
+              }}
+            />
+          </Box>
+        </Box>
+      )
+    }
+
+    return (
+      <Box flexDirection="column" width="100%" minHeight={e.props.scroll.bodyRows} paddingX={1} rowGap={1} backgroundColor={tone.panel}>
+        <Box flexDirection="row" width="100%" justifyContent="space-between" columnGap={2} paddingRight={HEADER_CLEARANCE}>
+          {chip(parts, 'DROPS', tone.liveBackground, tone.liveText)}
+          <Button key="drops:back" plain hotkey="b" label="retour" onPress={() => undefined} />
+        </Box>
+        {seen.drops.length === 0 && <Text {...quiet(tone, tone.panel)}>aucun fichier reçu — glisse-en un dans ~/inbox du PC</Text>}
+        <Box flexDirection="column" width="100%">
+          {seen.drops.map(row)}
+        </Box>
         <Box flexGrow={1} />
         {legend(parts, tone, [
           ['b', 'Retour au focus'],

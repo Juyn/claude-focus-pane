@@ -414,7 +414,7 @@ test('the command takes the first name the engine does not already have', async 
 
   await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
 
-  expect(asked).toEqual(['focus-pane'])
+  expect(asked.filter(name => name !== 'inbox')).toEqual(['focus-pane'])
 })
 
 test('the pane names the command it was actually granted', async ($, on) => {
@@ -432,7 +432,7 @@ test('the pane names the command it was actually granted', async ($, on) => {
 
   const pane = await wide($)
   expect(await pane.find({ text: '  /mission' })).toBeDefined()
-  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite  s Sessions  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
+  expect((await pane.find({ key: 'legend' }))?.text).toMatch(/^\/tui fullscreen Pane à droite  s Sessions  d Drops  ctrl\+x tab Clavier  esc Rendre la main  \/mission Rouvrir$/)
 })
 
 test('a reload registers the remembered command again', async ($, on) => {
@@ -454,7 +454,7 @@ test('a reload registers the remembered command again', async ($, on) => {
   await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
   await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
 
-  expect(asked).toEqual(['mission', 'mission'])
+  expect(asked.filter(name => name !== 'inbox')).toEqual(['mission', 'mission'])
 })
 
 test('m opens the mockups tab, which draws a thumbnail a screen and keeps the open button', async ($, on) => {
@@ -1025,13 +1025,14 @@ test('no card of its own under AGENTS: the totals sit in the title, right of the
   const title = seek(await pane.drawn(), node => node.props?.key === 'agents:title')
   const kids = (title?.children ?? []) as Drawn[]
   expect(kids).toHaveLength(2)
-  // Left: AGENTS ›. Right: the totals, then the fold button, then the Sessions button.
+  // Left: AGENTS ›. Right: the totals, then the fold button, then the Sessions and Drops buttons.
   expect(JSON.stringify(kids[0])).toContain('AGENTS ›')
   const right = (kids[1]?.children ?? []) as Drawn[]
-  expect(right).toHaveLength(3)
+  expect(right).toHaveLength(4)
   expect(String(right[0]?.children?.join(''))).toMatch(TOTALS)
   expect(right[1]?.props?.key).toBe('agents:fold')
   expect(right[2]?.props?.key).toBe('sessions:open')
+  expect(right[3]?.props?.key).toBe('drops:open')
 })
 
 test('a very long todo title gives way, the totals and the fold button stay whole', async ($, on) => {
@@ -2245,4 +2246,100 @@ test('the band draws on the desktop too', async ($, on) => {
   await inboxStart($, on, [entry('rapport.pdf')])
 
   expect((await (await band($, 'desktop')).find({ key: 'inbox:band' }))?.text).toContain('rapport.pdf')
+})
+
+const DROPS = 'drops'
+const dropsPane = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') =>
+  $.ui.mount({ plugin: 'focus-pane', surface, component: 'Pane', requestId: DROPS, props: { ...PROPS, bodyColumns: 100, placement: 'dock' as const } })
+
+/** Every `drops:row:` key of a drawn tree, in drawing order, with whether its name is bold. */
+const dropRows = (tree: unknown) => {
+  const rows: { key: string; isBold: boolean }[] = []
+  const walk = (node: unknown, row: string | null) => {
+    const one = node as Drawn
+    if (!one || typeof one !== 'object') return
+    const key = String(one.props?.key ?? '')
+    const inRow = key.startsWith('drops:row:') ? key : row
+    if (key.startsWith('drops:row:')) rows.push({ key, isBold: false })
+    if (inRow !== null && one.type === 'Text' && one.props?.bold === true) {
+      const last = rows.find(r => r.key === inRow)
+      if (last) last.isBold = true
+    }
+    for (const child of one.children ?? []) walk(child, inRow)
+  }
+  walk(tree, null)
+
+  return rows
+}
+
+const sevenDrops = () => Array.from({ length: 7 }, (_, at) => entry(`f${at}.pdf`, 1_000, T0 - (at + 1) * 60_000))
+
+test('/inbox opens the Drops tab: newest first, the 5 latest set off', async ($, on) => {
+  await inboxStart($, on, sevenDrops())
+  await $.command.run({ command: 'inbox', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  const rows = dropRows(await (await dropsPane($)).drawn())
+
+  expect(opened).toContain('drops')
+  expect(rows.map(one => one.key)).toEqual(['drops:row:0', 'drops:row:1', 'drops:row:2', 'drops:row:3', 'drops:row:4', 'drops:row:5', 'drops:row:6'])
+  expect(rows.map(one => one.isBold)).toEqual([true, true, true, true, true, false, false])
+})
+
+test('a row says name, size, age, and who took it', async ($, on) => {
+  const clock = await start($, on)
+  files.set(TAKEN, JSON.stringify({ 'f0.pdf': { sessionId: 'other', name: 'Paiements', at: T0 } }))
+  folders.set(INBOX, sevenDrops())
+  await clock.advance(3_000)
+  await clock.advance(3_000)
+  const pane = await dropsPane($)
+
+  expect((await pane.find({ key: 'drops:row:0' }))?.text).toContain('pris par Paiements')
+  expect((await pane.find({ key: 'drops:row:1' }))?.text).toContain('f1.pdf')
+  expect((await pane.find({ key: 'drops:row:1' }))?.text).toContain('1000 o')
+})
+
+test('copier le chemin puts the exact path on the clipboard; refused, a toast shows it', async ($, on) => {
+  await inboxStart($, on, [entry('Relevé : mars.pdf')])
+  const pane = await dropsPane($)
+  await pane.press({ key: 'drops:copy:0' })
+  expect(copies).toEqual(['/home/test/inbox/Relevé : mars.pdf'])
+
+  isCopyRefused = true
+  await pane.press({ key: 'drops:copy:0' })
+  expect(toasts.some(one => one.includes('/home/test/inbox/Relevé : mars.pdf'))).toBe(true)
+})
+
+test('insérer from the tab inserts the mention and marks it taken', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  await (await dropsPane($)).press({ key: 'drops:insert:0' })
+
+  expect(fills).toEqual(['@/home/test/inbox/rapport.pdf '])
+  expect(written.some(one => one.path === TAKEN)).toBe(true)
+})
+
+test('an empty inbox says so', async ($, on) => {
+  await inboxStart($, on, [])
+
+  expect(await (await dropsPane($)).find({ text: 'aucun fichier reçu — glisse-en un dans ~/inbox du PC' })).toBeDefined()
+})
+
+test('a 200-character name: one row, cut, never wrapped', async ($, on) => {
+  await inboxStart($, on, [entry(`${'x'.repeat(200)}.pdf`)])
+  const row = await (await dropsPane($)).find({ key: 'drops:row:0' })
+
+  expect(row?.text.length).toBeLessThan(200)
+})
+
+test('/mission drops and d in Focus open the tab too', async ($, on) => {
+  await start($, on)
+  await $.command.run({ command: 'mission', args: 'drops', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  expect(opened.filter(one => one === 'drops')).toHaveLength(1)
+
+  await (await tallPane($)).press({ key: 'drops:open' })
+  expect(opened.filter(one => one === 'drops')).toHaveLength(2)
+})
+
+test('the Drops tab draws on the desktop too', async ($, on) => {
+  await inboxStart($, on, sevenDrops())
+
+  expect(dropRows(await (await dropsPane($, 'desktop')).drawn())).toHaveLength(7)
 })
