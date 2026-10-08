@@ -2232,6 +2232,15 @@ test('an empty box, or one that cannot be read, gets no leading space', async ($
   expect(fills).toEqual(['@/home/test/inbox/rapport.pdf '])
 })
 
+test('a second session.start (a hot reload) keeps the band instead of blanking it for a tick', async ($, on) => {
+  await inboxStart($, on, [entry('rapport.pdf')])
+  expect(await (await band($)).find({ key: 'inbox:band' })).toBeDefined()
+
+  await $.session.start({ cwd: '/home/xavier/Sites', surface: 'terminal', isInteractive: true })
+
+  expect((await (await band($)).find({ key: 'inbox:band' }))?.text).toContain('rapport.pdf')
+})
+
 test('a file another session took leaves the band', async ($, on) => {
   const clock = await start($, on)
   files.set(TAKEN, JSON.stringify({ 'rapport.pdf': { sessionId: 'other', name: 'Paiements', at: T0 } }))

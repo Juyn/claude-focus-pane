@@ -4228,7 +4228,8 @@ export const register: Register = on => {
       void publishBeat($, true).catch(() => undefined)
     })
     // The inbox: read now, then every 3 s, for the band and the Drops tab; a reload drops the old timer.
-    lastListing = []
+    // Seeded from the atom (it survives the reload): the band and the tab do not blank for a tick.
+    lastListing = (await read($, inboxView)).drops.map(one => ({ name: one.name, size: one.size, mtimeMs: one.mtimeMs }))
     lastOffer = ''
     await readInbox($).catch(() => undefined)
     try {
